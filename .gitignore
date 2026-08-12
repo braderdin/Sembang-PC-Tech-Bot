@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+### MY PROJECT FILES
+.env.local
+.env.example
+.archive/
