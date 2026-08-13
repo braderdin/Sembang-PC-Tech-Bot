@@ -1,9 +1,9 @@
 name: Auto Post Social Media (Telegram, FB Feed & FB Reels)
 
 on:
-  schedule:
+#  schedule:
     # Trigger pada 6am, 8am, 10am, 11am, 12pm, 2pm, 4pm, 5pm, 6pm, 8pm, 10pm & 12am (MYT)
-    - cron: '0 0,2,3,4,6,8,9,10,12,14,16,22 * * *'
+#    - cron: '0 0,2,3,4,6,8,9,10,12,14,16,22 * * *'
   workflow_dispatch:
     # Pilihan larian manual dari tab Actions di GitHub
 
