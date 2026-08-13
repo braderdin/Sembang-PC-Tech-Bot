@@ -1,17 +1,63 @@
 import os
 import time
+import random
 import tempfile
 import requests
 
 # Menyokong MoviePy v2.x dan v1.x secara automatik
 try:
-    from moviepy import ImageClip
+    from moviepy import ImageClip, AudioFileClip
 except ImportError:
-    from moviepy.editor import ImageClip
+    from moviepy.editor import ImageClip, AudioFileClip
+
+# Laluan folder audio tempatan di dalam projek
+MUSIC_FOLDER_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "music")
+
+def get_random_local_audio(duration=6):
+    """
+    Mengimbas folder assets/music dan memilih satu fail audio/video secara rawak.
+    Menyokong format .mp3, .wav, .m4a, dan .mp4 secara automatik.
+    """
+    if not os.path.exists(MUSIC_FOLDER_PATH):
+        os.makedirs(MUSIC_FOLDER_PATH, exist_ok=True)
+        print(f"⚠️ [REEL AUDIO WARN] Folder '{MUSIC_FOLDER_PATH}' tidak dijumpai. Folder baharu dicipta.")
+        return None, None
+
+    # Cari semua fail berformat .mp3, .wav, .m4a, atau .mp4 dalam folder assets/music
+    audio_files = [
+        f for f in os.listdir(MUSIC_FOLDER_PATH) 
+        if f.lower().endswith(('.mp3', '.wav', '.m4a', '.mp4'))
+    ]
+
+    if not audio_files:
+        print(f"⚠️ [REEL AUDIO WARN] Tiada fail audio/video ditemui di dalam folder '{MUSIC_FOLDER_PATH}'. Video dibina tanpa audio.")
+        return None, None
+
+    selected_song = random.choice(audio_files)
+    song_path = os.path.join(MUSIC_FOLDER_PATH, selected_song)
+    print(f"🎵 [REEL AUDIO SUCCESS] Memilih lagu Meta Sound Collection: '{selected_song}'")
+
+    try:
+        # AudioFileClip mengekstrak trek audio secara automatik daripada fail .mp4/.mp3
+        audio_clip = AudioFileClip(song_path)
+        
+        # Potong audio secara rawak jika durasi lagu cukup panjang
+        start_time = random.randint(0, max(0, int(audio_clip.duration) - duration - 2)) if audio_clip.duration > duration + 5 else 0
+        end_time = start_time + duration
+
+        if hasattr(audio_clip, "subclipped"):
+            audio_clip = audio_clip.subclipped(start_time, end_time)
+        else:
+            audio_clip = audio_clip.subclip(start_time, end_time)
+
+        return audio_clip, song_path
+    except Exception as e:
+        print(f"⚠️ [REEL AUDIO ERROR] Gagal memuatkan fail audio '{selected_song}': {e}")
+        return None, None
 
 def convert_image_to_reel_video(image_url, duration=6):
     """
-    Muat turun gambar dan tukarkan menjadi fail video MP4 berdurasi 6 saat untuk Reels.
+    Muat turun gambar dan tukarkan menjadi fail video MP4 berdurasi 6 saat berserta lagu dari assets/music.
     """
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -29,14 +75,33 @@ def convert_image_to_reel_video(image_url, duration=6):
         temp_video_path = temp_img_path.replace(".jpg", ".mp4")
         clip = ImageClip(temp_img_path)
         
-        # Penyesuaian sintaks durasi mengikut versi MoviePy
+        # Penyesuaian durasi video
         if hasattr(clip, "with_duration"):
             clip = clip.with_duration(duration)
         else:
             clip = clip.set_duration(duration)
 
-        clip.write_videofile(temp_video_path, fps=24, codec="libx264", audio=False, logger=None)
+        # Masukkan lagu dari folder tempatan secara dinamik
+        audio_clip, song_path = get_random_local_audio(duration=duration)
+        if audio_clip:
+            if hasattr(clip, "with_audio"):
+                clip = clip.with_audio(audio_clip)
+            else:
+                clip = clip.set_audio(audio_clip)
+
+        # Penjanaan video MP4 dengan trek audio AAC yang sah
+        clip.write_videofile(
+            temp_video_path, 
+            fps=24, 
+            codec="libx264", 
+            audio_codec="aac", 
+            logger=None
+        )
+        
+        # Bersihkan memori clip
         clip.close()
+        if audio_clip:
+            audio_clip.close()
 
         # Padam fail gambar sementara
         if os.path.exists(temp_img_path):
@@ -56,7 +121,7 @@ def send_to_facebook_reel(page_id, page_token, caption, image_url, affiliate_lin
 
     graph_base_url = "https://graph.facebook.com/v19.0"
 
-    print("  🎬 [REEL PROCESS] Memulakan penukaran gambar ke video MP4...")
+    print("  🎬 [REEL PROCESS] Memulakan penukaran gambar ke video MP4 berserta lagu latar...")
     video_file_path = convert_image_to_reel_video(image_url, duration=6)
     if not video_file_path or not os.path.exists(video_file_path):
         return False, "Gagal memproses gambar produk menjadi video Reel MP4."
@@ -84,7 +149,7 @@ def send_to_facebook_reel(page_id, page_token, caption, image_url, affiliate_lin
         upload_url = start_json["upload_url"]
         print(f"  ✅ [REEL STEP A SUCCESS] Video ID: {video_id}")
 
-        # 2. Langkah B Meta API: Upload Binary Video MP4 ke Server Meta dengan Pengepala offset yang Tepat
+        # 2. Langkah B Meta API: Upload Binary Video MP4 ke Server Meta
         print("  🎬 [REEL STEP B] Memuat naik data binary video ke Meta rupload server...")
         with open(video_file_path, "rb") as video_file:
             video_data = video_file.read()
@@ -131,7 +196,7 @@ def send_to_facebook_reel(page_id, page_token, caption, image_url, affiliate_lin
         clean_link = str(affiliate_link or "").strip()
         if clean_link:
             print("  🎬 [REEL STEP D] Menambah komen pautan affiliate...")
-            time.sleep(3)  # Tunggu 3 saat untuk memastikan video sedia menerima komen
+            time.sleep(3)
             comment_url = f"{graph_base_url}/{video_id}/comments"
             comment_text = f"🛒 Dapatkan produk dalam Reel ini di Lazada sekarang👇\n{clean_link}"
             comment_payload = {
