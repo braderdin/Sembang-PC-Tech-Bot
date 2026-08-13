@@ -32,15 +32,28 @@ def remove_emojis_and_special_symbols(text):
     lines = [line.strip() for line in text.splitlines()]
     return "\n".join(lines).strip()
 
+def smart_trim_text(text, max_chars=1000):
+    """
+    Memotong teks secara pintar pada noktah, tanda soal, atau tanda seru terakhir
+    supaya ayat tidak terputus di tengah-tengah perkataan.
+    """
+    if not text or len(text) <= max_chars:
+        return text
+
+    trimmed = text[:max_chars]
+    last_punc = max(trimmed.rfind('.'), trimmed.rfind('?'), trimmed.rfind('!'))
+    
+    if last_punc != -1 and last_punc > 100:
+        return trimmed[:last_punc + 1].strip()
+    else:
+        last_space = trimmed.rfind(' ')
+        if last_space != -1:
+            return trimmed[:last_space].strip() + "..."
+        return trimmed + "..."
+
 def detect_current_time_slot():
     """
     Mengenal pasti slot masa semasa mengikut zon masa Malaysia (MYT = UTC+8).
-    
-    Slot:
-    - morning_early (6:30 AM): Kopi pagi, ketenangan meja kerja, produktiviti subuh.
-    - morning_work  (9:30 AM): Mula kerja, ergonomik, kelebihan perkakasan (hardware/monitors).
-    - afternoon_tech(2:30 PM): Dunia perisian (software), Linux, tips IT, bug & programming.
-    - night_chill   (8:30 PM): Ambient light, RGB, gaming malam, sembang santai dunia gajet.
     """
     myt_time = datetime.now(timezone.utc) + timedelta(hours=8)
     hour = myt_time.hour
@@ -57,7 +70,6 @@ def detect_current_time_slot():
 def generate_lifestyle_theme_keyword(base_url, model, api_key, slot_override=None):
     """
     Jana 1 kata kunci carian utama (Core Theme Query) dalam Bahasa Inggeris untuk Unsplash API.
-    Satu kata kunci induk akan menghasilkan 10 gambar yang konsisten dan bertema serupa.
     """
     slot_id, slot_desc = detect_current_time_slot()
     if slot_override:
@@ -112,7 +124,6 @@ Kembalikan HANYA teks kata kunci carian tanpa sebarang tanda petik, tanda baca, 
         if response.status_code == 200:
             res_json = response.json()
             query_text = res_json["choices"][0]["message"]["content"].strip()
-            # Pembersihan tanda petik jika ada
             query_text = re.sub(r'["\']', '', query_text).strip()
             if query_text:
                 return query_text
@@ -123,8 +134,7 @@ Kembalikan HANYA teks kata kunci carian tanpa sebarang tanda petik, tanda baca, 
 
 def generate_lifestyle_story(base_url, model, api_key, image_descriptions_list, slot_override=None):
     """
-    Menjana penceritaan AI Tech Specialist yang bijak, humoris, dan berinformasi
-    berdasarkan senarai huraian gambar yang dipilih dan slot masa semasa.
+    Menjana penceritaan AI Tech Specialist yang bijak, humoris, dan berinformasi.
     """
     slot_id, slot_desc = detect_current_time_slot()
     if slot_override:
@@ -149,7 +159,7 @@ GAMBAR-GAMBAR YANG DITAMPILKAN DALAM HANTARAN:
 {images_context}
 
 GAYA & SYARAT PENULISAN:
-1. Tulis penceritaan santai (Antara 350 hingga 550 aksara) yang selari dengan suasana waktu hantaran dan gambar di atas.
+1. Tulis penceritaan santai (Maksimum 800 aksara) yang selari dengan suasana waktu hantaran dan gambar di atas. Pastikan setiap perenggan dan ayat ditamatkan dengan noktah sempurna.
 2. Selitkan elemen kebijaksanaan pakar tech (seperti tips perkakasan, pandangan tentang Linux/OS, produktiviti, atau seloroh bab bug/setup) mengikut slot masa.
 3. DILARANG SAMA SEKALI meletakkan sebarang pautan (link), harga, atau mengajak membeli produk! Ini adalah hantaran perkongsian ilmu dan gaya hidup tech.
 4. PERATURAN BEBAS EMOJI (STRICT 0% EMOJI): Dilarang menggunakan sebarang emoji, simbol bintang, atau bullet khas. Luahkan kehangatan cerita melalui susunan ayat yang menarik.
@@ -163,13 +173,13 @@ GAYA & SYARAT PENULISAN:
             {"role": "user", "content": "Tuliskan penceritaan Facebook yang bijak dan menarik untuk slot ini."},
         ],
         "temperature": 0.8,
-        "max_tokens": 450,
+        "max_tokens": 1000,
     }
 
     url = f"{base_url.rstrip('/')}/chat/completions"
 
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=25)
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
         response.encoding = "utf-8"
 
         if response.status_code == 200:
@@ -178,8 +188,8 @@ GAYA & SYARAT PENULISAN:
                 raw_content = res_json["choices"][0]["message"]["content"].strip()
                 story_text = remove_emojis_and_special_symbols(raw_content)
 
-                if len(story_text) > 700:
-                    story_text = story_text[:697] + "..."
+                # Pemotongan pintar noktah terakhir sehingga 1000 aksara
+                story_text = smart_trim_text(story_text, max_chars=1000)
 
                 return True, story_text
             return False, "Format respon OpenRouter tidak sah."

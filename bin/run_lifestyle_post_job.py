@@ -107,13 +107,16 @@ def run_lifestyle_posting_job():
     fb_feed_success = False
     fb_reel_success = False
 
-    # 4. POS KE TELEGRAM CHANNEL (Guna Gambar Pertama)
+    # 4. POS KE TELEGRAM CHANNEL (Guna Gambar Pertama & Potong Jika Panjang)
     if tg_token and tg_chat_id:
         print("✈️ [STEP 4] Pos ke Telegram Channel...")
+        # Telegram photo caption selamat di bawah 1000 aksara
+        tg_caption = story_text[:980] + "..." if len(story_text) > 1000 else story_text
+        
         sent_tg, res_tg = send_photo_to_telegram(
             token=tg_token,
             chat_id=tg_chat_id,
-            caption=story_text,
+            caption=tg_caption,
             image_url=image_urls[0],
             affiliate_link=""
         )
@@ -123,7 +126,7 @@ def run_lifestyle_posting_job():
         else:
             print(f"  ❌ Gagal pos ke Telegram: {res_tg}")
 
-    # 5. POS KE FACEBOOK PAGE FEED (Guna Gambar Pertama)
+    # 5. POS KE FACEBOOK PAGE FEED (Guna Teks Penuh Sehingga 1000 Aksara)
     if fb_page_id and fb_page_token:
         print("\n📘 [STEP 5] Pos ke Facebook Page Feed...")
         sent_fb, res_fb = send_to_facebook_page(
