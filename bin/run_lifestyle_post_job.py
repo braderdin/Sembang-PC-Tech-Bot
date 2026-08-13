@@ -28,15 +28,24 @@ from src.lifestyle_image_fetcher import (
 from src.lifestyle_reel_bot import send_lifestyle_to_facebook_reel
 from src.telegram_bot import send_photo_to_telegram
 from src.facebook_bot import send_to_facebook_page
-from src.redis_db import mark_product_posted
-from src.vector_db import is_similar_product_posted, mark_vector_posted
+from src.threads_bot import send_to_threads
+
+# Import Modul Pangkalan Data KHAS Lifestyle (Memory Bank & Vector Deduplication)
+from src.lifestyle_redis_db import (
+    get_lifestyle_story_memories,
+    save_lifestyle_story_memory
+)
+from src.lifestyle_vector_db import (
+    is_similar_lifestyle_story_posted,
+    mark_lifestyle_vector_posted
+)
 
 def run_lifestyle_posting_job():
     print("\n" + "=" * 70)
     print("📖 [START] ENJIN PEMPOSAN CERITA HARIAN & LIFESTYLE REEL (AI TECH SPECIALIST)")
     print("=" * 70)
 
-    # Pembacaan daripada Pembolehubah Persekitaran (.env.local / GitHub Secrets)
+    # Pembacaan daripada Pembolehubah Persekitaran
     base_url = os.getenv("OPENROUTER_BASE_URL", "").strip()
     model = os.getenv("OPENROUTER_MODEL", "").strip()
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
@@ -58,16 +67,26 @@ def run_lifestyle_posting_job():
         os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
     )
 
-    # 1. KESAN SLOT MASA & JANA KATA KUNCI INDUK
-    slot_id, slot_desc = detect_current_time_slot()
-    print(f"\n⏰ [SLOT MASA] Waktu Semasa: {slot_desc}")
+    threads_user_id = os.getenv("THREADS_USER_ID", "").strip()
+    threads_token = os.getenv("THREADS_ACCESS_TOKEN", "").strip()
 
-    print("\n💡 [STEP 1] AI Persona menjana 1 Kata Kunci Tema Induk Unsplash...")
+    # 1. KESAN SLOT MASA & MOOD HARI
+    slot_id, slot_desc, day_mood, temp_val = detect_current_time_slot()
+    print(f"\n⏰ [SLOT MASA]: {slot_desc}")
+    print(f"🎭 [MOOD HARI]: {day_mood}")
+
+    # 2. BACA BANK INGATAN REDIS (MEMORIES)
+    print("\n🧠 [STEP 1] Membaca Bank Ingatan Cerita Terkini dari Upstash Redis...")
+    previous_memories = get_lifestyle_story_memories(redis_url, redis_token, limit=5)
+    print(f"  ✅ {len(previous_memories)} ingatan cerita lepas berjaya dimuatkan ke dalam memori AI.")
+
+    # 3. JANA KATA KUNCI INDUK
+    print("\n💡 [STEP 2] AI Persona menjana 1 Kata Kunci Tema Induk Unsplash...")
     query_keyword = generate_lifestyle_theme_keyword(base_url, model, api_key)
     print(f"🎯 [KATA KUNCI INDUK]: '{query_keyword}'")
 
-    # 2. TARIK 3 GAMBAR BERTEMA SERUPA DARI UNSPLASH (1 API CALL)
-    print("\n🌐 [STEP 2] Menarik 3 gambar bertema serupa dari Unsplash API (1 Request)...")
+    # 4. TARIK 3 GAMBAR BERTEMA SERUPA DARI UNSPLASH
+    print("\n🌐 [STEP 3] Menarik 3 gambar bertema serupa dari Unsplash API...")
     image_candidates = fetch_similar_theme_images(
         access_key=unsplash_key,
         query_keyword=query_keyword,
@@ -80,39 +99,45 @@ def run_lifestyle_posting_job():
         print("❌ [ABORT] Tiada gambar yang sah dijumpai dari Unsplash.")
         return
 
-    print(f"✅ Berjaya mengumpul {len(image_candidates)} gambar Unsplash bertema serupa.")
-
     image_urls = [img["image_url"] for img in image_candidates]
     image_descs = [img["description"] for img in image_candidates]
     photo_ids = [img["photo_id"] for img in image_candidates]
 
-    for idx, img in enumerate(image_candidates, 1):
-        print(f"   {idx}. Photo ID: {img['photo_id']} | Desc: {img['description'][:60]}...")
-
-    # 3. AI TECH SPECIALIST JANA PENCERITAAN
-    print("\n✍️ [STEP 3] AI Tech Specialist menjana cerita Facebook berdasarkan 3 gambar...")
+    # 5. AI TECH SPECIALIST JANA PENCERITAAN (DENGAN INGATAN & MOOD)
+    print("\n✍️ [STEP 4] AI Tech Specialist menjana cerita Facebook bersumberkan gambar + ingatan...")
     ai_ok, story_text = generate_lifestyle_story(
         base_url=base_url,
         model=model,
         api_key=api_key,
-        image_descriptions_list=image_descs
+        image_descriptions_list=image_descs,
+        previous_memories=previous_memories
     )
 
     if not ai_ok or not story_text:
-        story_text = "Salam kawan-kawan! Kopi pagi dah siap, setup meja dah kemas. Semoga hari ini penuh dengan ilham dan produktiviti untuk kita semua!"
+        story_text = "Salam kawan-kawan! Kopi dah siap, setup meja dah kemas. Semoga hari ini penuh dengan produktiviti untuk kita semua!"
+
+    # 6. SEMAK KESERUPAAN CERITA DI VECTOR DB
+    if is_similar_lifestyle_story_posted(vector_url, vector_token, story_text):
+        print("⚠️ [LIFESTYLE VECTOR] Topik cerita ini didapati terlalu serupa dengan cerita < 48 jam lepas. Menjana semula...")
+        ai_ok, story_text = generate_lifestyle_story(
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            image_descriptions_list=image_descs,
+            previous_memories=previous_memories
+        )
 
     print(f"\n✅ [KAPSYEN AI TECH SPECIALIST]:\n{story_text}\n")
 
     tg_success = False
     fb_feed_success = False
     fb_reel_success = False
+    threads_success = False
 
-    # 4. POS KE TELEGRAM CHANNEL (Guna Gambar Pertama & Potong Jika Panjang)
+    # 7. POS KE TELEGRAM CHANNEL
     if tg_token and tg_chat_id:
-        print("✈️ [STEP 4] Pos ke Telegram Channel...")
-        # Telegram photo caption selamat di bawah 1000 aksara
+        print("✈️ [STEP 5] Pos ke Telegram Channel...")
         tg_caption = story_text[:980] + "..." if len(story_text) > 1000 else story_text
-        
         sent_tg, res_tg = send_photo_to_telegram(
             token=tg_token,
             chat_id=tg_chat_id,
@@ -123,12 +148,10 @@ def run_lifestyle_posting_job():
         if sent_tg:
             print("  ✅ Berjaya dipos ke Telegram Channel!")
             tg_success = True
-        else:
-            print(f"  ❌ Gagal pos ke Telegram: {res_tg}")
 
-    # 5. POS KE FACEBOOK PAGE FEED (Guna Teks Penuh Sehingga 1000 Aksara)
+    # 8. POS KE FACEBOOK PAGE FEED
     if fb_page_id and fb_page_token:
-        print("\n📘 [STEP 5] Pos ke Facebook Page Feed...")
+        print("\n📘 [STEP 6] Pos ke Facebook Page Feed...")
         sent_fb, res_fb = send_to_facebook_page(
             page_id=fb_page_id,
             page_token=fb_page_token,
@@ -139,12 +162,10 @@ def run_lifestyle_posting_job():
         if sent_fb:
             print(f"  ✅ Berjaya dipos ke Facebook Page Feed! (Post ID: {res_fb.get('post_id')})")
             fb_feed_success = True
-        else:
-            print(f"  ❌ Gagal pos ke Facebook Page Feed: {res_fb}")
 
-    # 6. POS KE FACEBOOK REELS (Slideshow 3 Gambar + Lagu Meta)
+    # 9. POS KE FACEBOOK REELS
     if fb_page_id and fb_page_token:
-        print("\n🎬 [STEP 6] Pos ke Facebook Reels (Slideshow 3 Gambar + Lagu Meta)...")
+        print("\n🎬 [STEP 7] Pos ke Facebook Reels...")
         sent_reel, res_reel = send_lifestyle_to_facebook_reel(
             page_id=fb_page_id,
             page_token=fb_page_token,
@@ -154,26 +175,37 @@ def run_lifestyle_posting_job():
         if sent_reel:
             print(f"  ✅ Berjaya dipos ke Facebook Lifestyle Reels! (Video ID: {res_reel.get('video_id')})")
             fb_reel_success = True
-        else:
-            print(f"  ❌ Gagal pos ke Facebook Reels: {res_reel}")
 
-    # 7. REKOD STATUS KE REDIS & VECTOR DB
-    if tg_success or fb_feed_success or fb_reel_success:
-        print("\n💾 [STEP 7] Merekodkan status pemposan ke pangkalan data...")
+    # 10. POS KE THREADS
+    if threads_user_id and threads_token:
+        print("\n🧵 [STEP 8] Pos ke Threads (AI Persona Lifestyle)...")
+        sent_threads, res_threads = send_to_threads(
+            user_id=threads_user_id,
+            access_token=threads_token,
+            caption=story_text,
+            image_url=image_urls[0],
+            affiliate_link=""
+        )
+        if sent_threads:
+            print(f"  ✅ Berjaya dipos ke Threads! (Post ID: {res_threads.get('thread_post_id')})")
+            threads_success = True
+
+    # 11. REKOD STATUS KE REDIS MEMORY & VECTOR DB
+    if tg_success or fb_feed_success or fb_reel_success or threads_success:
+        print("\n💾 [STEP 9] Merekodkan status & ingatan ke pangkalan data...")
+        
+        # Rekod Unsplash Photo ID supaya tidak diulang dalam 30 hari
         for pid in photo_ids:
             mark_image_id_posted(redis_url, redis_token, pid)
-        print(f"  ✅ {len(photo_ids)} Unsplash Photo ID direkodkan di Upstash Redis (TTL 30 Hari).")
 
-        unique_id = f"lifestyle_{photo_ids[0]}"
-        if redis_url and redis_token:
-            mark_product_posted(redis_url, redis_token, unique_id, story_text)
-            print("  ✅ Rekod cerita direkodkan di Upstash Redis.")
+        # Simpan cerita baharu ke dalam Bank Ingatan Redis (LPUSH)
+        save_lifestyle_story_memory(redis_url, redis_token, story_text, max_memories=10)
 
-        if vector_url and vector_token:
-            mark_vector_posted(vector_url, vector_token, unique_id, story_text)
-            print("  ✅ Rekod embedding disimpan di Upstash Vector DB.")
+        # Simpan embedding cerita ke Upstash Vector DB
+        story_id = photo_ids[0]
+        mark_lifestyle_vector_posted(vector_url, vector_token, story_id, story_text)
 
-        print("\n🎉 [SUCCESS] Seluruh aliran pemposan cerita lifestyle selesai dengan jayanya!\n")
+        print("\n🎉 [SUCCESS] Seluruh aliran pemposan cerita lifestyle & ingatan AI selesai dengan jayanya!\n")
 
 if __name__ == "__main__":
     run_lifestyle_posting_job()

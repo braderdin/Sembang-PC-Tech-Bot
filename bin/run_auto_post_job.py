@@ -25,6 +25,7 @@ from src.ai_persona import generate_caption
 from src.telegram_bot import send_photo_to_telegram
 from src.facebook_bot import send_to_facebook_page
 from src.facebook_reel_bot import send_to_facebook_reel
+from src.threads_bot import send_to_threads
 
 def clean_image_url(url):
     """Memperbetulkan extension bertindih seperti .jpg.jpg atau .png.png."""
@@ -68,10 +69,10 @@ def fetch_all_links_fallback():
 
 def run_auto_posting_job():
     print("\n" + "="*70)
-    print("🤖 [START] ENJIN PEMPOSAN AUTOMATIK SOCIAL MEDIA (TG, FB PAGE & FB REELS)")
+    print("🤖 [START] ENJIN PEMPOSAN AUTOMATIK SOCIAL MEDIA (TG, FB PAGE, FB REELS & THREADS)")
     print("="*70)
 
-    # Membaca semua tetapan secara dinamik dari persekitaran (WAJIB DARI .env.local ATAU GITHUB SECRETS)
+    # Membaca semua tetapan secara dinamik dari persekitaran
     base_url = os.getenv("OPENROUTER_BASE_URL", "").strip()
     model = os.getenv("OPENROUTER_MODEL", "").strip()
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
@@ -90,6 +91,9 @@ def run_auto_posting_job():
         os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip() or 
         os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
     )
+
+    threads_user_id = os.getenv("THREADS_USER_ID", "").strip()
+    threads_token = os.getenv("THREADS_ACCESS_TOKEN", "").strip()
 
     print("\n📦 [STEP 1] Membaca pautan dari Supabase Cloud...")
     ok, candidate_list, err_msg = fetch_unused_links(limit=100)
@@ -175,6 +179,7 @@ def run_auto_posting_job():
     tg_success = False
     fb_success = False
     reel_success = False
+    threads_success = False
 
     # 4. PROSES TELEGRAM
     if tg_token and tg_chat_id:
@@ -224,9 +229,25 @@ def run_auto_posting_job():
         else:
             print(f"  ❌ Gagal pos ke Facebook Reels: {res_reel}")
 
-    # 7. REKOD STATUS KE PANGKALAN DATA SEKERAS KURANGNYA 1 PLATFORM BERJAYA
-    if tg_success or fb_success or reel_success:
-        print("\n💾 [STEP 7] Merekodkan status pemposan ke pangkalan data...")
+    # 7. PROSES THREADS
+    if threads_user_id and threads_token:
+        print("\n🧵 [STEP 7] Pos ke Threads...")
+        sent_threads_ok, res_threads = send_to_threads(
+            user_id=threads_user_id,
+            access_token=threads_token,
+            caption=shared_caption,
+            image_url=img_url,
+            affiliate_link=aff_link
+        )
+        if sent_threads_ok:
+            print(f"  ✅ Berjaya dipos ke Threads! (Post ID: {res_threads.get('thread_post_id')})")
+            threads_success = True
+        else:
+            print(f"  ❌ Gagal pos ke Threads: {res_threads}")
+
+    # 8. REKOD STATUS KE PANGKALAN DATA SEKERAS KURANGNYA 1 PLATFORM BERJAYA
+    if tg_success or fb_success or reel_success or threads_success:
+        print("\n💾 [STEP 8] Merekodkan status pemposan ke pangkalan data...")
 
         if mark_product_posted(redis_url, redis_token, p_id, title):
             print("  ✅ Rekod direkodkan di Upstash Redis (TTL 15 Hari).")
