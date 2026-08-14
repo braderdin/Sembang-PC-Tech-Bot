@@ -5,7 +5,7 @@ import random
 import requests
 from dotenv import load_dotenv
 
-# Memastikan laluan akar projek dimasukkan ke dalam sys.path supaya modul dari 'src' boleh diimport
+# Memastikan laluan akar projek dimasukkan ke dalam sys.path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -29,13 +29,21 @@ from src.threads_bot import send_to_threads
 from src.threads_ai_persona import generate_threads_affiliate_caption
 from src.threads_token_manager import get_active_threads_token
 
+# Import Modul Khas Instagram & Audit Telegram
+from src.instagram_bot import instagram_bot
+from src.instagram_ai_persona import instagram_ai
+from src.instagram_redis import instagram_redis
+from src.instagram_audit import send_instagram_audit_to_telegram
+
+
 def clean_image_url(url):
     """Memperbetulkan extension bertindih seperti .jpg.jpg atau .png.png."""
     if not url:
         return ""
-    cleaned = re.sub(r'(\.(jpg|jpeg|png|webp))\.\2$', r'\1', url, flags=re.I)
-    cleaned = re.sub(r'(\.(jpg|jpeg|png|webp))\1$', r'\1', cleaned, flags=re.I)
+    cleaned = re.sub(r"(\.(jpg|jpeg|png|webp))\.\2$", r"\1", url, flags=re.I)
+    cleaned = re.sub(r"(\.(jpg|jpeg|png|webp))\1$", r"\1", cleaned, flags=re.I)
     return cleaned
+
 
 def is_image_url_valid(url):
     """Memastikan URL gambar sah, wujud, dan boleh dimuat turun (Status HTTP 200)."""
@@ -48,17 +56,18 @@ def is_image_url_valid(url):
     except Exception:
         return False
 
+
 def fetch_all_links_fallback():
     """Cadangan kecemasan jika pautan unused kosong."""
     supabase_url, api_key, err = get_supabase_config()
     if err or not supabase_url:
         return []
-    
+
     endpoint = f"{supabase_url}/rest/v1/affiliate_links?select=*&order=created_at.desc&limit=100"
     headers = {
         "apikey": api_key,
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
     try:
         res = requests.get(endpoint, headers=headers, timeout=15)
@@ -69,10 +78,11 @@ def fetch_all_links_fallback():
         print(f"⚠️ [SUPABASE FALLBACK WARN] {e}")
     return []
 
+
 def run_auto_posting_job():
-    print("\n" + "="*70)
-    print("🤖 [START] ENJIN PEMPOSAN AUTOMATIK SOCIAL MEDIA (TG, FB PAGE, FB REELS & THREADS)")
-    print("="*70)
+    print("\n" + "=" * 70)
+    print("🤖 [START] ENJIN PEMPOSAN AUTOMATIK SOCIAL MEDIA (TG, FB, REELS, THREADS & IG)")
+    print("=" * 70)
 
     # Membaca semua tetapan secara dinamik dari persekitaran
     base_url = os.getenv("OPENROUTER_BASE_URL", "").strip()
@@ -89,14 +99,13 @@ def run_auto_posting_job():
 
     fb_page_id = os.getenv("FACEBOOK_PAGE_ID", "").strip() or os.getenv("META_PAGE_ID", "").strip()
     fb_page_token = (
-        os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", "").strip() or 
-        os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip() or 
-        os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
+        os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", "").strip()
+        or os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
+        or os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
     )
 
     threads_user_id = os.getenv("THREADS_USER_ID", "").strip()
     raw_threads_token = os.getenv("THREADS_ACCESS_TOKEN", "").strip()
-    # Mengambil Token Terkini Secara Dinamik dari Upstash Redis
     threads_token = get_active_threads_token(redis_url, redis_token, raw_threads_token)
 
     print("\n📦 [STEP 1] Membaca pautan dari Supabase Cloud...")
@@ -121,7 +130,7 @@ def run_auto_posting_job():
         title = str(item.get("title") or item.get("product_name") or "").strip()
         aff_link = str(item.get("affiliate_link") or item.get("promo_short_link") or "").strip()
         raw_img_url = str(item.get("image_url") or item.get("picture_url") or "").strip()
-        
+
         img_url = clean_image_url(raw_img_url)
 
         if not p_id or not title or not aff_link or not img_url:
@@ -132,12 +141,17 @@ def run_auto_posting_job():
             print(f"  ⏭️ [REDIS SKIP] ID {p_id} ('{title[:30]}...') pernah dipos dalam tempoh 15 hari.")
             continue
 
-        # B. Semak Upstash Vector DB (Semantic Similarity 2 Hari)
+        # B. Semak Instagram Redis Khusus
+        if instagram_redis.is_product_posted(p_id):
+            print(f"  ⏭️ [IG REDIS SKIP] ID {p_id} pernah dipos ke Instagram.")
+            continue
+
+        # C. Semak Upstash Vector DB (Semantic Similarity 2 Hari)
         if is_similar_product_posted(vector_url, vector_token, title):
             print(f"  ⏭️ [VECTOR SKIP] Tajuk '{title[:30]}...' serupa dengan produk dipos < 48 jam lepas.")
             continue
 
-        # C. Semak Kesahan Gambar (Bypass Produk Gambar Rosak/404)
+        # D. Semak Kesahan Gambar
         if not is_image_url_valid(img_url):
             print(f"  ⏭️ [IMAGE BROKEN SKIP] ID {p_id} Gambar tidak dapat diakses (404/Rosak). Langkau.")
             continue
@@ -147,7 +161,9 @@ def run_auto_posting_job():
             "title": title,
             "affiliate_link": aff_link,
             "image_url": img_url,
-            "category": item.get("category", "")
+            "category": item.get("category", ""),
+            "price": item.get("price", ""),
+            "features": item.get("features", item.get("description", "")),
         }
         break
 
@@ -172,7 +188,7 @@ def run_auto_posting_job():
         model=model,
         api_key=api_key,
         product_title=title,
-        product_desc=title
+        product_desc=title,
     )
 
     if not ai_ok or not shared_caption:
@@ -184,8 +200,9 @@ def run_auto_posting_job():
     fb_success = False
     reel_success = False
     threads_success = False
+    ig_success = False
 
-    # 4. PROSES TELEGRAM
+    # 4. PROSES TELEGRAM CHANNEL
     if tg_token and tg_chat_id:
         print("✈️ [STEP 4] Pos ke Telegram Channel...")
         sent_tg_ok, res_tg = send_photo_to_telegram(
@@ -193,7 +210,7 @@ def run_auto_posting_job():
             chat_id=tg_chat_id,
             caption=shared_caption,
             image_url=img_url,
-            affiliate_link=aff_link
+            affiliate_link=aff_link,
         )
         if sent_tg_ok:
             print("  ✅ Berjaya dipos ke Telegram Channel!")
@@ -209,15 +226,15 @@ def run_auto_posting_job():
             page_token=fb_page_token,
             caption=shared_caption,
             image_url=img_url,
-            affiliate_link=aff_link
+            affiliate_link=aff_link,
         )
         if sent_fb_ok:
-            print(f"  ✅ Berjaya dipos ke Facebook Page Feed + Komen Link Affiliate! (Post ID: {res_fb.get('post_id')})")
+            print(f"  ✅ Berjaya dipos ke Facebook Page Feed! (Post ID: {res_fb.get('post_id')})")
             fb_success = True
         else:
             print(f"  ❌ Gagal pos ke Facebook Page Feed: {res_fb}")
 
-    # 6. PROSES FACEBOOK REELS (VIDEO MP4 DARI GAMBAR)
+    # 6. PROSES FACEBOOK REELS
     if fb_page_id and fb_page_token:
         print("\n🎬 [STEP 6] Pos ke Facebook Reels...")
         sent_reel_ok, res_reel = send_to_facebook_reel(
@@ -225,30 +242,30 @@ def run_auto_posting_job():
             page_token=fb_page_token,
             caption=shared_caption,
             image_url=img_url,
-            affiliate_link=aff_link
+            affiliate_link=aff_link,
         )
         if sent_reel_ok:
-            print(f"  ✅ Berjaya dipos ke Facebook Reels + Komen Link Affiliate! (Video ID: {res_reel.get('video_id')})")
+            print(f"  ✅ Berjaya dipos ke Facebook Reels! (Video ID: {res_reel.get('video_id')})")
             reel_success = True
         else:
             print(f"  ❌ Gagal pos ke Facebook Reels: {res_reel}")
 
     # 7. PROSES THREADS
     if threads_user_id and threads_token:
-        print("\n🧵 [STEP 7] Pos ke Threads (AI Persona Khas Threads)...")
+        print("\n🧵 [STEP 7] Pos ke Threads...")
         threads_custom_caption = generate_threads_affiliate_caption(
             base_url=base_url,
             model=model,
             api_key=api_key,
             product_title=title,
-            product_desc=title
+            product_desc=title,
         )
         sent_threads_ok, res_threads = send_to_threads(
             user_id=threads_user_id,
             access_token=threads_token,
             caption=threads_custom_caption,
             image_url=img_url,
-            affiliate_link=aff_link
+            affiliate_link=aff_link,
         )
         if sent_threads_ok:
             print(f"  ✅ Berjaya dipos ke Threads! (Post ID: {res_threads.get('thread_post_id')})")
@@ -256,9 +273,39 @@ def run_auto_posting_job():
         else:
             print(f"  ❌ Gagal pos ke Threads: {res_threads}")
 
-    # 8. REKOD STATUS KE PANGKALAN DATA SEKERAS KURANGNYA 1 PLATFORM BERJAYA
-    if tg_success or fb_success or reel_success or threads_success:
-        print("\n💾 [STEP 8] Merekodkan status pemposan ke pangkalan data...")
+    # 8. PROSES INSTAGRAM FEED + AUDIT NOTIFICATION KE TELEGRAM
+    if instagram_bot.is_configured():
+        print("\n📸 [STEP 8] Pos ke Instagram Feed (@braderdin360)...")
+        ig_caption = instagram_ai.generate_affiliate_caption(selected_product)
+        res_ig = instagram_bot.post_photo(
+            image_url=img_url,
+            caption=ig_caption,
+            product_id=p_id,
+            post_type="affiliate",
+        )
+
+        if res_ig.get("success"):
+            ig_permalink = res_ig.get("permalink", "")
+            print(f"  ✅ Berjaya dipos ke Instagram! Pautan: {ig_permalink}")
+            ig_success = True
+
+            # Hantar kad audit ke Telegram peribadi/channel
+            if tg_token and tg_chat_id:
+                print("  🔍 Menghantar salinan audit Instagram ke Telegram...")
+                send_instagram_audit_to_telegram(
+                    token=tg_token,
+                    chat_id=tg_chat_id,
+                    caption=ig_caption,
+                    image_url=img_url,
+                    permalink=ig_permalink,
+                    post_type="Affiliate Racun Gajet",
+                )
+        else:
+            print(f"  ❌ Gagal pos ke Instagram: {res_ig.get('error')}")
+
+    # 9. REKOD STATUS KE PANGKALAN DATA JIKA SEKURANG-KURANGNYA 1 PLATFORM BERJAYA
+    if tg_success or fb_success or reel_success or threads_success or ig_success:
+        print("\n💾 [STEP 9] Merekodkan status pemposan ke pangkalan data...")
 
         if mark_product_posted(redis_url, redis_token, p_id, title):
             print("  ✅ Rekod direkodkan di Upstash Redis (TTL 15 Hari).")
@@ -272,6 +319,7 @@ def run_auto_posting_job():
         print("\n🎉 [SUCCESS] Seluruh aliran pemposan automatik selesai dengan jayanya!\n")
     else:
         print("\n❌ Pemposan tidak berjaya dilaksanakan di mana-mana platform.")
+
 
 if __name__ == "__main__":
     run_auto_posting_job()
