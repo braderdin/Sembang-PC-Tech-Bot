@@ -3,20 +3,21 @@ import re
 import json
 import random
 import requests
+from collections import Counter
 from datetime import datetime, timezone, timedelta
 
-# Senarai 20+ Kata Kunci Tema Induk Unsplash (Pendek: 2-3 Perkataan Sahaja untuk Jaminan Jumpa Gambar)
+# Senarai 40 Kata Kunci Tema Induk Unsplash (Pendek: 2-3 Perkataan, Pelbagai Sub-Niche Tech & Kaya Gambar)
 TECH_VISUAL_SEEDS = [
     "mechanical keyboard",
     "minimalist workspace",
     "dark coding setup",
-    "server room",
+    "datacenter server",
     "cable management desk",
     "audiophile studio desk",
     "vintage retro computer",
     "custom pc build",
     "ultrawide monitor setup",
-    "homelab server",
+    "server hardware rack",
     "coffee laptop workspace",
     "electronics circuit board",
     "scandinavian workspace",
@@ -26,7 +27,27 @@ TECH_VISUAL_SEEDS = [
     "espresso laptop desk",
     "racing simulator cockpit",
     "dual monitor workspace",
-    "pc water cooling"
+    "pc water cooling",
+    "programmer dark room",
+    "cyberpunk desk setup",
+    "mini itx pc",
+    "clean office desk",
+    "studio monitor speakers",
+    "keycaps macro shot",
+    "rgb gaming battlestation",
+    "laptop wooden table",
+    "triple monitor setup",
+    "creative designer workspace",
+    "software developer desk",
+    "ambient room lighting",
+    "curved gaming monitor",
+    "ipad desk setup",
+    "ergonomic office chair",
+    "synthwave neon desk",
+    "modern workstation tech",
+    "cozy night desk",
+    "pc gaming hardware",
+    "linux terminal screen"
 ]
 
 def remove_emojis_and_special_symbols(text):
@@ -61,7 +82,7 @@ def remove_emojis_and_special_symbols(text):
     )
     text = emoji_pattern.sub("", text)
 
-    # 4. Tapis aksara asing bukan Rumi (buang huruf Arab, Gujerat, dsb jika LLM glitch)
+    # 4. Tapis aksara asing bukan Rumi (buang huruf Hindi, Arab, Cyrillic, Gujerat dsb jika LLM glitch)
     text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\s.,!?:;\'"()/\-#@+]', '', text)
 
     lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines()]
@@ -88,15 +109,35 @@ def smart_trim_text(text, max_chars=1000):
 
 def is_valid_story_text(text):
     """
-    Menyemak kesahan kualiti cerita AI bagi menghalang kebocoran teks rosak.
+    Menyemak kesahan kualiti cerita AI:
+    - Menghalang kebocoran teks rosak / pad token.
+    - Mengesan gelung pengulangan perkataan (autoregressive loop / repetitive spam).
     """
-    if not text or len(text.strip()) < 50:
+    if not text or len(text.strip()) < 60:
         return False
     if "<pad>" in text.lower() or "<unk>" in text.lower():
         return False
-    words = text.split()
-    if len(words) > 10 and len(set(words)) < 5:
+
+    # 1. Semak Pengulangan Berturut-turut (Contoh: "frontsi frontsi frontsi")
+    if re.search(r'(\b\w+\b)(?:\s+\1){2,}', text, flags=re.IGNORECASE):
         return False
+
+    words = [w.lower() for w in re.findall(r'\b\w+\b', text)]
+    total_words = len(words)
+    if total_words < 15:
+        return False
+
+    # 2. Semak Nisbah Kepelbagaian Perkataan (Unique Words Ratio)
+    unique_words = set(words)
+    if len(unique_words) / total_words < 0.45:
+        return False
+
+    # 3. Semak Kekerapan Perkataan Tunggal (Maksimum 15% untuk perkataan panjang >= 4 huruf)
+    word_counts = Counter(words)
+    for word, count in word_counts.items():
+        if len(word) >= 4 and (count / total_words) > 0.15:
+            return False
+
     return True
 
 def detect_current_time_slot():
@@ -136,6 +177,7 @@ def generate_lifestyle_theme_keyword(base_url, model, api_key, slot_override=Non
     if slot_override:
         slot_id = slot_override
 
+    # Pilih 1 sudut inspirasi rawak daripada 40 senarai tema
     visual_seed = random.choice(TECH_VISUAL_SEEDS)
 
     if not base_url or not model or not api_key:
@@ -147,13 +189,13 @@ def generate_lifestyle_theme_keyword(base_url, model, api_key, slot_override=Non
     }
 
     system_prompt = f"""
-Anda ialah AI Tech Specialist.
+Anda ialah AI Tech Specialist yang kreatif.
 WAKTU MALAYSIA: {slot_desc}
 MOOD HARI: {day_mood}
 INSPIRASI VISUAL: '{visual_seed}'
 
 TUGAS ANDA:
-Hasilkan TEPAT 2 hingga 3 perkataan carian foto Unsplash dalam Bahasa Inggeris (Short keyword search).
+Berdasarkan inspirasi visual di atas dan suasana masa sekarang, hasilkan TEPAT 2 hingga 3 perkataan carian foto Unsplash dalam Bahasa Inggeris (Short keyword search).
 DILARANG buat ayat panjang atau melebihi 3 patah perkataan supaya carian sentiasa menjumpai gambar di Unsplash.
 
 CONTOH KATA KUNCI PENDEK:
@@ -188,6 +230,7 @@ Kembalikan HANYA 2-3 perkataan tanpa tanda petik.
             query_text = re.sub(r'["\']', '', query_text).strip()
             query_text = re.sub(r'<pad>|<unk>', '', query_text, flags=re.IGNORECASE).strip()
             
+            # Kunci ketat: ambil maksimum 3 perkataan terawal
             words = query_text.split()
             if words:
                 clean_short_keyword = " ".join(words[:3])
@@ -201,7 +244,7 @@ Kembalikan HANYA 2-3 perkataan tanpa tanda petik.
 def generate_lifestyle_story(base_url, model, api_key, image_descriptions_list, previous_memories=None, slot_override=None):
     """
     Menjana penceritaan AI Tech Specialist untuk Facebook Page & Telegram
-    dengan suntikan Bank Ingatan & Perlindungan Anti-Glitch.
+    dengan suntikan Bank Ingatan, Perlindungan Anti-Glitch & Frequency Penalty.
     """
     slot_id, slot_desc, day_mood, dynamic_temp = detect_current_time_slot()
     if slot_override:
@@ -256,7 +299,9 @@ GAYA & SYARAT PENULISAN:
             {"role": "user", "content": "Tuliskan penceritaan Facebook yang bijak dan segar berdasarkan gambar dan ingatan lalu."},
         ],
         "temperature": dynamic_temp,
-        "max_tokens": 800,
+        "max_tokens": 1000,
+        "frequency_penalty": 0.4, # Menghalang pengulangan perkataan yang sama
+        "presence_penalty": 0.2    # Menggalakkan variasi topik perkataan baharu
     }
 
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -276,7 +321,7 @@ GAYA & SYARAT PENULISAN:
                     if is_valid_story_text(final_story):
                         return True, final_story
                     else:
-                        print(f"⚠️ [GLITCH DETECTED - ATTEMPT {attempt+1}] Teks mengandungi token rosak/pad. Mencuba semula...")
+                        print(f"⚠️ [GLITCH/REPETITION DETECTED - ATTEMPT {attempt+1}] Teks mengandungi perkataan rosak/berulang. Mencuba semula...")
             else:
                 print(f"⚠️ [OPENROUTER WARN]: HTTP {response.status_code} - {response.text}")
 

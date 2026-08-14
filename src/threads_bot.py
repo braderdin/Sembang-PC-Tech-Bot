@@ -54,7 +54,8 @@ def auto_refresh_threads_token(access_token):
 
 def send_to_threads(user_id, access_token, caption, image_url="", affiliate_link=""):
     """
-    Menghantar hantaran ke Threads API dengan Perlindungan Had 500 Aksara Automatik.
+    Menghantar hantaran ke Threads API dengan Perlindungan Had 500 Aksara
+    serta Logik Auto-Retry 3 Saat untuk kestabilan media.
     """
     if not user_id or not access_token:
         return False, "THREADS_USER_ID atau THREADS_ACCESS_TOKEN tidak wujud di persekitaran."
@@ -64,23 +65,20 @@ def send_to_threads(user_id, access_token, caption, image_url="", affiliate_link
     if affiliate_link:
         affiliate_text = f"\n\n🛒 Dapatkan di sini: {affiliate_link}"
 
-    # 2. HARI SAFETY GUARDRAIL (THREADS HARD LIMIT = 500 AKSARA)
-    # Kira baki aksara yang tinggal untuk kapsyen
+    # 2. SAFETY GUARDRAIL (THREADS HARD LIMIT = 500 AKSARA)
     max_caption_allowed = 500 - len(affiliate_text) - 5  # Buffer keselamatan 5 aksara
     if max_caption_allowed < 50:
         max_caption_allowed = 450
 
-    # Potong kapsyen secara pintar
     trimmed_caption = smart_trim_for_threads(caption, max_chars=max_caption_allowed)
     full_text = f"{trimmed_caption}{affiliate_text}".strip()
 
-    # Semakan terakhir jaminan 100% <= 500 aksara
     if len(full_text) > 500:
         full_text = full_text[:496] + "..."
 
     create_url = f"{THREADS_GRAPH_URL}/{user_id}/threads"
 
-    # 3. TENTUKAN JENIS MEDIA
+    # 3. TENTUKAN JENIS MEDIA (KEKAL WAJIB BERGAMBAR JIKA ADA URL)
     if image_url and image_url.startswith("http"):
         create_payload = {
             "media_type": "IMAGE",
@@ -96,23 +94,37 @@ def send_to_threads(user_id, access_token, caption, image_url="", affiliate_link
         }
 
     try:
-        # LANGKAH 1: Cipta Media Container di Threads
+        # LANGKAH 1: Cipta Media Container di Threads (Auto-Retry jika CDN lambat)
         print(f"🧵 [THREADS STEP A] Membina Media Container (Saiz Teks: {len(full_text)}/500 aksara)...")
-        res_create = requests.post(create_url, data=create_payload, timeout=20)
-        create_json = res_create.json()
+        
+        creation_container_id = None
+        last_error_a = ""
 
-        if res_create.status_code != 200 or "id" not in create_json:
-            error_msg = f"HTTP {res_create.status_code} | {res_create.text}"
-            print(f"❌ [THREADS ERROR STEP A] {error_msg}")
-            return False, f"Langkah A Gagal: {error_msg}"
+        for attempt in range(2):
+            res_create = requests.post(create_url, data=create_payload, timeout=25)
+            try:
+                create_json = res_create.json()
+            except Exception:
+                create_json = {}
 
-        creation_container_id = create_json["id"]
-        print(f"✅ [THREADS STEP A SUCCESS] Container ID: {creation_container_id}")
+            if res_create.status_code == 200 and "id" in create_json:
+                creation_container_id = create_json["id"]
+                print(f"✅ [THREADS STEP A SUCCESS] Container ID: {creation_container_id}")
+                break
+            else:
+                last_error_a = f"HTTP {res_create.status_code} | {res_create.text}"
+                if attempt == 0:
+                    print(f"⚠️ [THREADS STEP A RETRY] Percubaan 1 gagal. Menunggu 3 saat untuk percubaan semula...")
+                    time.sleep(3)
+                else:
+                    print(f"❌ [THREADS ERROR STEP A] {last_error_a}")
+                    return False, f"Langkah A Gagal: {last_error_a}"
 
+        # Beri masa pelayan Meta memproses binary imej sebelum diterbitkan
         if create_payload.get("media_type") == "IMAGE":
-            time.sleep(2)
+            time.sleep(3)
 
-        # LANGKAH 2: Terbitkan Container ke Threads Profile
+        # LANGKAH 2: Terbitkan Container ke Threads Profile (Auto-Retry)
         print("🧵 [THREADS STEP B] Menerbitkan hantaran ke akaun Threads...")
         publish_url = f"{THREADS_GRAPH_URL}/{user_id}/threads_publish"
         publish_payload = {
@@ -120,17 +132,28 @@ def send_to_threads(user_id, access_token, caption, image_url="", affiliate_link
             "access_token": access_token
         }
 
-        res_publish = requests.post(publish_url, data=publish_payload, timeout=20)
-        publish_json = res_publish.json()
+        thread_post_id = None
+        last_error_b = ""
 
-        if res_publish.status_code != 200 or "id" not in publish_json:
-            error_msg = f"HTTP {res_publish.status_code} | {res_publish.text}"
-            print(f"❌ [THREADS ERROR STEP B] {error_msg}")
-            return False, f"Langkah B Gagal: {error_msg}"
+        for attempt in range(2):
+            res_publish = requests.post(publish_url, data=publish_payload, timeout=25)
+            try:
+                publish_json = res_publish.json()
+            except Exception:
+                publish_json = {}
 
-        thread_post_id = publish_json["id"]
-        print(f"🎉 [THREADS SUCCESS] Hantaran berjaya dipos ke Threads! (Post ID: {thread_post_id})")
-        return True, {"thread_post_id": thread_post_id}
+            if res_publish.status_code == 200 and "id" in publish_json:
+                thread_post_id = publish_json["id"]
+                print(f"🎉 [THREADS SUCCESS] Hantaran berjaya dipos ke Threads! (Post ID: {thread_post_id})")
+                return True, {"thread_post_id": thread_post_id}
+            else:
+                last_error_b = f"HTTP {res_publish.status_code} | {res_publish.text}"
+                if attempt == 0:
+                    print(f"⚠️ [THREADS STEP B RETRY] Percubaan 1 gagal. Menunggu 3 saat...")
+                    time.sleep(3)
+                else:
+                    print(f"❌ [THREADS ERROR STEP B] {last_error_b}")
+                    return False, f"Langkah B Gagal: {last_error_b}"
 
     except Exception as e:
         print(f"❌ [THREADS EXCEPTION] Ralat tidak dijangka: {str(e)}")

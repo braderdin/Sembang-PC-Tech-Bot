@@ -27,6 +27,7 @@ from src.facebook_bot import send_to_facebook_page
 from src.facebook_reel_bot import send_to_facebook_reel
 from src.threads_bot import send_to_threads
 from src.threads_ai_persona import generate_threads_affiliate_caption
+from src.threads_token_manager import get_active_threads_token
 
 def clean_image_url(url):
     """Memperbetulkan extension bertindih seperti .jpg.jpg atau .png.png."""
@@ -94,7 +95,9 @@ def run_auto_posting_job():
     )
 
     threads_user_id = os.getenv("THREADS_USER_ID", "").strip()
-    threads_token = os.getenv("THREADS_ACCESS_TOKEN", "").strip()
+    raw_threads_token = os.getenv("THREADS_ACCESS_TOKEN", "").strip()
+    # Mengambil Token Terkini Secara Dinamik dari Upstash Redis
+    threads_token = get_active_threads_token(redis_url, redis_token, raw_threads_token)
 
     print("\n📦 [STEP 1] Membaca pautan dari Supabase Cloud...")
     ok, candidate_list, err_msg = fetch_unused_links(limit=100)

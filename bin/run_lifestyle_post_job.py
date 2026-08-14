@@ -30,6 +30,7 @@ from src.telegram_bot import send_photo_to_telegram
 from src.facebook_bot import send_to_facebook_page
 from src.threads_bot import send_to_threads
 from src.threads_ai_persona import generate_threads_lifestyle_caption
+from src.threads_token_manager import get_active_threads_token
 
 # Import Modul Pangkalan Data KHAS Lifestyle (Memory Bank & Vector Deduplication)
 from src.lifestyle_redis_db import (
@@ -69,7 +70,9 @@ def run_lifestyle_posting_job():
     )
 
     threads_user_id = os.getenv("THREADS_USER_ID", "").strip()
-    threads_token = os.getenv("THREADS_ACCESS_TOKEN", "").strip()
+    raw_threads_token = os.getenv("THREADS_ACCESS_TOKEN", "").strip()
+    # Mengambil Token Terkini Secara Dinamik dari Upstash Redis
+    threads_token = get_active_threads_token(redis_url, redis_token, raw_threads_token)
 
     # 1. KESAN SLOT MASA & MOOD HARI
     slot_id, slot_desc, day_mood, temp_val = detect_current_time_slot()
@@ -150,14 +153,14 @@ def run_lifestyle_posting_job():
             print("  ✅ Berjaya dipos ke Telegram Channel!")
             tg_success = True
 
-    # 8. POS KE FACEBOOK PAGE FEED
+    # 8. POS KE FACEBOOK PAGE FEED (MULTI-PHOTO 3 GAMBAR ALBUM)
     if fb_page_id and fb_page_token:
-        print("\n📘 [STEP 6] Pos ke Facebook Page Feed...")
+        print("\n📘 [STEP 6] Pos ke Facebook Page Feed (3 Gambar Album)...")
         sent_fb, res_fb = send_to_facebook_page(
             page_id=fb_page_id,
             page_token=fb_page_token,
             caption=story_text,
-            image_url=image_urls[0],
+            image_urls=image_urls,
             affiliate_link=""
         )
         if sent_fb:
