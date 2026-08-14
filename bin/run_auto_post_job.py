@@ -26,6 +26,7 @@ from src.telegram_bot import send_photo_to_telegram
 from src.facebook_bot import send_to_facebook_page
 from src.facebook_reel_bot import send_to_facebook_reel
 from src.threads_bot import send_to_threads
+from src.threads_ai_persona import generate_threads_affiliate_caption
 
 def clean_image_url(url):
     """Memperbetulkan extension bertindih seperti .jpg.jpg atau .png.png."""
@@ -231,11 +232,18 @@ def run_auto_posting_job():
 
     # 7. PROSES THREADS
     if threads_user_id and threads_token:
-        print("\n🧵 [STEP 7] Pos ke Threads...")
+        print("\n🧵 [STEP 7] Pos ke Threads (AI Persona Khas Threads)...")
+        threads_custom_caption = generate_threads_affiliate_caption(
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            product_title=title,
+            product_desc=title
+        )
         sent_threads_ok, res_threads = send_to_threads(
             user_id=threads_user_id,
             access_token=threads_token,
-            caption=shared_caption,
+            caption=threads_custom_caption,
             image_url=img_url,
             affiliate_link=aff_link
         )

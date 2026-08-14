@@ -1,20 +1,51 @@
 import os
 import re
 import json
+import random
 import requests
 from datetime import datetime, timezone, timedelta
 
+# Senarai 20+ Kata Kunci Tema Induk Unsplash (Pendek: 2-3 Perkataan Sahaja untuk Jaminan Jumpa Gambar)
+TECH_VISUAL_SEEDS = [
+    "mechanical keyboard",
+    "minimalist workspace",
+    "dark coding setup",
+    "server room",
+    "cable management desk",
+    "audiophile studio desk",
+    "vintage retro computer",
+    "custom pc build",
+    "ultrawide monitor setup",
+    "homelab server",
+    "coffee laptop workspace",
+    "electronics circuit board",
+    "scandinavian workspace",
+    "screenbar desk light",
+    "gaming room neon",
+    "standing desk setup",
+    "espresso laptop desk",
+    "racing simulator cockpit",
+    "dual monitor workspace",
+    "pc water cooling"
+]
+
 def remove_emojis_and_special_symbols(text):
     """
-    Membersihkan teks daripada emoji dan simbol khas untuk mengekalkan mutu penulisan yang kemas.
+    Membersihkan teks daripada emoji, simbol khas, kod token LLM (<pad>),
+    dan aksara bukan Rumi (untuk elak isu token drift/glitch bahasa asing).
     """
     if not text:
         return ""
     
+    # 1. Buang token khas LLM
+    text = re.sub(r'<pad>|<unk>|<s>|</s>|\[PAD\]|\[UNK\]', '', text, flags=re.IGNORECASE)
+
+    # 2. Buang simbol bullet khas
     special_bullets = ["❖", "◆", "◇", "►", "•", "▪", "▲", "★", "➡", "➢"]
     for sym in special_bullets:
         text = text.replace(sym, "-")
 
+    # 3. Buang emoji
     emoji_pattern = re.compile(
         "["
         "\U0001f600-\U0001f64f"
@@ -29,12 +60,16 @@ def remove_emojis_and_special_symbols(text):
         flags=re.UNICODE,
     )
     text = emoji_pattern.sub("", text)
-    lines = [line.strip() for line in text.splitlines()]
-    return "\n".join(lines).strip()
+
+    # 4. Tapis aksara asing bukan Rumi (buang huruf Arab, Gujerat, dsb jika LLM glitch)
+    text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\s.,!?:;\'"()/\-#@+]', '', text)
+
+    lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines()]
+    return "\n".join([line for line in lines if line]).strip()
 
 def smart_trim_text(text, max_chars=1000):
     """
-    Memotong teks secara pintar pada noktah, tanda soal, atau tanda seru terakhir
+    Memotong teks secara pintar pada tanda baca terakhir
     supaya ayat tidak terputus di tengah-tengah perkataan.
     """
     if not text or len(text) <= max_chars:
@@ -51,15 +86,28 @@ def smart_trim_text(text, max_chars=1000):
             return trimmed[:last_space].strip() + "..."
         return trimmed + "..."
 
+def is_valid_story_text(text):
+    """
+    Menyemak kesahan kualiti cerita AI bagi menghalang kebocoran teks rosak.
+    """
+    if not text or len(text.strip()) < 50:
+        return False
+    if "<pad>" in text.lower() or "<unk>" in text.lower():
+        return False
+    words = text.split()
+    if len(words) > 10 and len(set(words)) < 5:
+        return False
+    return True
+
 def detect_current_time_slot():
     """
     Mengenal pasti slot masa semasa dan mood hari mengikut zon masa Malaysia (MYT = UTC+8).
+    Suhu (temperature) ditala stabil antara 0.70 - 0.72 untuk elak glitch tatabahasa.
     """
     myt_time = datetime.now(timezone.utc) + timedelta(hours=8)
     hour = myt_time.hour
-    day_name = myt_time.strftime("%A") # Isnin - Ahad
+    day_name = myt_time.strftime("%A")
 
-    # Matriks Mood Mengikut Hari
     day_mood_map = {
         "Monday": "Isnin (Mood Hustle, Fokus, Produktiviti & Semangat Mula Minggu)",
         "Tuesday": "Selasa (Mood Mengemas Aliran Kerja, Tips Perkakasan & Ergonomik)",
@@ -72,30 +120,26 @@ def detect_current_time_slot():
     current_day_mood = day_mood_map.get(day_name, "Hari Biasa Tech")
 
     if 4 <= hour < 8:
-        return "morning_early", "Pagi / Subuh (Kopi, Ketenangan Setup & Fikiran Produktif)", current_day_mood, 0.75
+        return "morning_early", "Pagi / Subuh (Kopi, Ketenangan Setup & Fikiran Produktif)", current_day_mood, 0.70
     elif 8 <= hour < 12:
-        return "morning_work", "Pagi / Waktu Kerja (Mula Kerja, Perkakasan PC & Ergonomik)", current_day_mood, 0.75
+        return "morning_work", "Pagi / Waktu Kerja (Mula Kerja, Perkakasan PC & Ergonomik)", current_day_mood, 0.70
     elif 12 <= hour < 18:
-        return "afternoon_tech", "Petang / Waktu IT (Software, Linux, Tips Coding & Aliran Kerja)", current_day_mood, 0.80
+        return "afternoon_tech", "Petang / Waktu IT (Software, Linux, Tips Coding & Aliran Kerja)", current_day_mood, 0.72
     else:
-        return "night_chill", "Malam / Santai (Pencahayaan Ambient, Gaming & Gajet Idaman)", current_day_mood, 0.90
+        return "night_chill", "Malam / Santai (Pencahayaan Ambient, Gaming & Gajet Idaman)", current_day_mood, 0.72
 
 def generate_lifestyle_theme_keyword(base_url, model, api_key, slot_override=None):
     """
-    Jana 1 kata kunci carian utama (Core Theme Query) dalam Bahasa Inggeris untuk Unsplash API.
+    Menjana kata kunci carian Unsplash pendek (2-3 perkataan) yang sentiasa segar dan berkualiti.
     """
-    slot_id, slot_desc, day_mood, temp_val = detect_current_time_slot()
+    slot_id, slot_desc, day_mood, _ = detect_current_time_slot()
     if slot_override:
         slot_id = slot_override
 
+    visual_seed = random.choice(TECH_VISUAL_SEEDS)
+
     if not base_url or not model or not api_key:
-        fallback_map = {
-            "morning_early": "cozy morning coffee desk setup aesthetic",
-            "morning_work": "clean minimalist dual monitor workspace setup",
-            "afternoon_tech": "programmer coding setup linux terminal screen",
-            "night_chill": "dark room RGB mechanical keyboard ambient setup"
-        }
-        return fallback_map.get(slot_id, "clean modern PC setup workspace")
+        return visual_seed
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -103,25 +147,34 @@ def generate_lifestyle_theme_keyword(base_url, model, api_key, slot_override=Non
     }
 
     system_prompt = f"""
-Anda ialah seorang AI Tech Specialist yang pintar, kreatif, dan peka waktu.
-WAKTU SEMASA DI MALAYSIA: {slot_desc}
-MOOD HARI SEMASA: {day_mood}
+Anda ialah AI Tech Specialist.
+WAKTU MALAYSIA: {slot_desc}
+MOOD HARI: {day_mood}
+INSPIRASI VISUAL: '{visual_seed}'
 
 TUGAS ANDA:
-Jana TEPAT 1 kata kunci carian gambar Unsplash dalam Bahasa Inggeris (English search query) yang fokus kepada tema meja kerja, gajet, perkakasan PC, ekosistem IT, atau suasana teknologi yang estetik dan bersesuaian dengan waktu tersebut.
+Hasilkan TEPAT 2 hingga 3 perkataan carian foto Unsplash dalam Bahasa Inggeris (Short keyword search).
+DILARANG buat ayat panjang atau melebihi 3 patah perkataan supaya carian sentiasa menjumpai gambar di Unsplash.
 
-FORMAT OUTPUT WAJIB:
-Kembalikan HANYA teks kata kunci carian tanpa sebarang tanda petik, tanda baca, atau penerangan tambahan.
+CONTOH KATA KUNCI PENDEK:
+- minimalist desk
+- coding dark room
+- mechanical keyboard
+- server hardware
+- gaming ambient light
+
+FORMAT OUTPUT:
+Kembalikan HANYA 2-3 perkataan tanpa tanda petik.
 """
 
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt.strip()},
-            {"role": "user", "content": "Jana 1 kata kunci carian Unsplash untuk waktu ini."},
+            {"role": "user", "content": "Beri 1 kata kunci carian Unsplash (2-3 perkataan sahaja)."},
         ],
-        "temperature": 0.85,
-        "max_tokens": 50,
+        "temperature": 0.70,
+        "max_tokens": 20,
     }
 
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -133,23 +186,35 @@ Kembalikan HANYA teks kata kunci carian tanpa sebarang tanda petik, tanda baca, 
             res_json = response.json()
             query_text = res_json["choices"][0]["message"]["content"].strip()
             query_text = re.sub(r'["\']', '', query_text).strip()
-            if query_text:
-                return query_text
+            query_text = re.sub(r'<pad>|<unk>', '', query_text, flags=re.IGNORECASE).strip()
+            
+            words = query_text.split()
+            if words:
+                clean_short_keyword = " ".join(words[:3])
+                if len(clean_short_keyword) >= 4:
+                    return clean_short_keyword
     except Exception as e:
         print(f"⚠️ [AI KEYWORD GEN ERROR]: {e}")
 
-    return "minimalist modern tech workspace setup"
+    return visual_seed
 
 def generate_lifestyle_story(base_url, model, api_key, image_descriptions_list, previous_memories=None, slot_override=None):
     """
-    Menjana penceritaan AI Tech Specialist dengan suntikan Bank Ingatan (Memory Bank) & Mood Dinamik.
+    Menjana penceritaan AI Tech Specialist untuk Facebook Page & Telegram
+    dengan suntikan Bank Ingatan & Perlindungan Anti-Glitch.
     """
     slot_id, slot_desc, day_mood, dynamic_temp = detect_current_time_slot()
     if slot_override:
         slot_id = slot_override
 
+    fallback_story = (
+        "Salam kawan-kawan! Selesai satu hari yang produktif di hadapan monitor. "
+        "Bila meja kerja kemas dan susun atur teratur, rasa tenang sikit nak rehatkan minda. "
+        "Korang macam mana petang ni, setup meja dah sedia untuk aktiviti santai hujung minggu?"
+    )
+
     if not base_url or not model or not api_key:
-        return False, "Kunci OpenRouter API / Base URL / Model tidak lengkap."
+        return True, fallback_story
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -158,31 +223,30 @@ def generate_lifestyle_story(base_url, model, api_key, image_descriptions_list, 
 
     images_context = "\n".join([f"- Gambar {i+1}: {desc}" for i, desc in enumerate(image_descriptions_list)])
 
-    # Formatkan Bank Ingatan
     memory_context = ""
     if previous_memories and isinstance(previous_memories, list) and len(previous_memories) > 0:
         formatted_memories = "\n".join([f"- {mem[:120]}..." for mem in previous_memories])
         memory_context = f"""
-INGATAN CERITA LEPAS ANDA (JANGAN ULANG AYAT PEMBUKA, PLOT, ATAL TOPIK YANG SAMA):
+INGATAN CERITA LEPAS ANDA (JANGAN ULANG AYAT PEMBUKA, PLOT, ATAU TOPIK YANG SAMA):
 {formatted_memories}
 """
 
     system_prompt = f"""
-Anda ialah seorang AI Tech Specialist di Malaysia yang bijak, berpengalaman, peramah, dan kelakar. Anda suka berkongsi pandangan tentang dunia komputer, perkakasan PC, ekosistem Linux/Open Source, petua produktiviti, dan trend IT semasa secara santai di Facebook Page 'Sembang PC & Tech Malaysia'.
+Anda ialah seorang AI Tech Specialist di Malaysia yang bijak, berpengalaman, peramah, dan santai di Facebook Page 'Sembang PC & Tech Malaysia'.
 
 WAKTU HANTARAN (MALAYSIA): {slot_desc}
 MOOD SUASANA HARI INI: {day_mood}
 
-GAMBAR-GAMBAR YANG DITAMPILKAN DALAM HANTARAN:
+GAMBAR-GAMBAR YANG DITAMPILKAN DALAM HANTARAN (ALBUM 3 GAMBAR):
 {images_context}
 {memory_context}
 GAYA & SYARAT PENULISAN:
-1. Tulis penceritaan santai (Maksimum 800 aksara) yang selari dengan suasana waktu hantaran, mood hari, dan gambar di atas.
-2. JANGAN guna ayat pembuka yang klise atau sama dengan ingatan cerita lepas! Variasikan intonasi pembuka anda.
-3. Selitkan elemen kebijaksanaan pakar tech (seperti tips perkakasan, pandangan tentang Linux/OS, produktiviti, atau seloroh bab bug/setup) mengikut slot masa.
+1. Tulis penceritaan santai (Maksimum 700 aksara) yang selari dengan suasana waktu hantaran, mood hari, dan gambar di atas.
+2. JANGAN guna ayat pembuka yang klise atau sama dengan ingatan cerita lepas!
+3. Selitkan pandangan bijak tentang perkakasan PC, aliran kerja coding/Linux, ergonomik, atau setup meja.
 4. DILARANG SAMA SEKALI meletakkan sebarang pautan (link), harga, atau mengajak membeli produk!
-5. PERATURAN BEBAS EMOJI (STRICT 0% EMOJI): Dilarang menggunakan sebarang emoji, simbol bintang, atau bullet khas.
-6. Akhiri hantaran dengan soalan mesra untuk mengajak komuniti Tech berdiskusi di ruang komen.
+5. PERATURAN BEBAS EMOJI (STRICT 0% EMOJI): Dilarang menggunakan sebarang emoji atau simbol pelik.
+6. Akhiri hantaran dengan soalan santai untuk mengajak komuniti berbincang di ruang komen Facebook.
 """
 
     payload = {
@@ -191,27 +255,33 @@ GAYA & SYARAT PENULISAN:
             {"role": "system", "content": system_prompt.strip()},
             {"role": "user", "content": "Tuliskan penceritaan Facebook yang bijak dan segar berdasarkan gambar dan ingatan lalu."},
         ],
-        "temperature": dynamic_temp, # Temperature Dinamik mengikut slot masa
-        "max_tokens": 1000,
+        "temperature": dynamic_temp,
+        "max_tokens": 800,
     }
 
     url = f"{base_url.rstrip('/')}/chat/completions"
 
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        response.encoding = "utf-8"
+    for attempt in range(2):
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response.encoding = "utf-8"
 
-        if response.status_code == 200:
-            res_json = response.json()
-            if "choices" in res_json and len(res_json["choices"]) > 0:
-                raw_content = res_json["choices"][0]["message"]["content"].strip()
-                story_text = remove_emojis_and_special_symbols(raw_content)
-                story_text = smart_trim_text(story_text, max_chars=1000)
+            if response.status_code == 200:
+                res_json = response.json()
+                if "choices" in res_json and len(res_json["choices"]) > 0:
+                    raw_content = res_json["choices"][0]["message"]["content"].strip()
+                    cleaned_text = remove_emojis_and_special_symbols(raw_content)
+                    final_story = smart_trim_text(cleaned_text, max_chars=800)
 
-                return True, story_text
-            return False, "Format respon OpenRouter tidak sah."
-        else:
-            return False, f"OpenRouter API Error (Status {response.status_code}): {response.text}"
+                    if is_valid_story_text(final_story):
+                        return True, final_story
+                    else:
+                        print(f"⚠️ [GLITCH DETECTED - ATTEMPT {attempt+1}] Teks mengandungi token rosak/pad. Mencuba semula...")
+            else:
+                print(f"⚠️ [OPENROUTER WARN]: HTTP {response.status_code} - {response.text}")
 
-    except Exception as e:
-        return False, f"Ralat Rangkaian OpenRouter API: {str(e)}"
+        except Exception as e:
+            print(f"⚠️ [AI GENERATION EXCEPTION - ATTEMPT {attempt+1}]: {e}")
+
+    print("🛡️ [SAFETY FALLBACK] Mengaktifkan cerita sandaran bersih demi keselamatan media sosial.")
+    return True, fallback_story

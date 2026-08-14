@@ -29,6 +29,7 @@ from src.lifestyle_reel_bot import send_lifestyle_to_facebook_reel
 from src.telegram_bot import send_photo_to_telegram
 from src.facebook_bot import send_to_facebook_page
 from src.threads_bot import send_to_threads
+from src.threads_ai_persona import generate_threads_lifestyle_caption
 
 # Import Modul Pangkalan Data KHAS Lifestyle (Memory Bank & Vector Deduplication)
 from src.lifestyle_redis_db import (
@@ -178,11 +179,19 @@ def run_lifestyle_posting_job():
 
     # 10. POS KE THREADS
     if threads_user_id and threads_token:
-        print("\n🧵 [STEP 8] Pos ke Threads (AI Persona Lifestyle)...")
+        print("\n🧵 [STEP 8] Pos ke Threads (AI Persona Khas Threads)...")
+        threads_custom_caption = generate_threads_lifestyle_caption(
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            image_description=image_descs[0],
+            slot_desc=slot_desc,
+            day_mood=day_mood
+        )
         sent_threads, res_threads = send_to_threads(
             user_id=threads_user_id,
             access_token=threads_token,
-            caption=story_text,
+            caption=threads_custom_caption,
             image_url=image_urls[0],
             affiliate_link=""
         )
