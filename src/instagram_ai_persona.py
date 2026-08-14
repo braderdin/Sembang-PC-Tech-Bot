@@ -1,155 +1,208 @@
 #!/usr/bin/env python3
 """
 Instagram AI Persona Engine (Brader Din Style)
-Sembang PC & Tech Ecosystem
-Optimized for Gemma / Gemini Models with positive contextual prompting.
+Sembang PC & Tech Ecosystem (100% Dynamic OpenRouter & Glitch-Proof)
 """
 
 import os
 import re
+import requests
 from typing import Dict, Any, Optional
-import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Konfigurasi Model AI
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
-MODEL_NAME = os.getenv("GEMMA_MODEL_NAME", "gemini-1.5-flash")
+# Kata dasar Bahasa Melayu untuk pengesahan kualiti teks (Guardrails)
+MALAY_ANCHOR_WORDS = {
+    "yang", "dan", "di", "ke", "kat", "ni", "tu", "dah", "nak", "ada",
+    "kita", "korang", "saya", "buat", "bila", "dengan", "pun", "rasa",
+    "meja", "setup", "pc", "kerja", "santai", "tengok", "dalam", "untuk",
+    "tak", "bukan", "memang", "lagi", "hujung", "minggu", "malam", "pagi", "petang"
+}
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+
+def clean_glitches_and_meta_chatter(text: str) -> str:
+    """
+    Membersihkan teks daripada:
+    1. Token rosak LLM (<pad>, <unk>).
+    2. Karakter rosak / encoding glitch (mojibake: ð, â, â).
+    3. Mukadimah AI ("Berikut adalah...", "**Caption Instagram:**") dan nota tips tambahan.
+    """
+    if not text:
+        return ""
+
+    # 1. Buang token khas LLM
+    text = re.sub(r'<pad>|<unk>|<s>|</s>|\[PAD\]|\[UNK\]|<\|.*?\|>', '', text, flags=re.IGNORECASE)
+
+    # 2. Buang simbol mojibake / glitch encoding
+    text = re.sub(r'[ðâ][\x80-\xbf]{1,4}', '', text)
+    text = re.sub(r'[\x80-\x9f]', '', text)
+
+    # 3. Standardkan simbol bullet point
+    special_bullets = ["❖", "◆", "◇", "►", "▪", "▲", "★", "➡", "➢"]
+    for sym in special_bullets:
+        text = text.replace(sym, "•")
+
+    # 4. Buang mukadimah pembantu AI di awal teks
+    text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption)[^\n]*?\n+', '', text)
+    text = re.sub(r'(?i)\*\*caption\s*(?:instagram)?\s*:\*\*', '', text)
+
+    # 5. Buang bahagian "Tips Tambahan" di penghujung teks
+    text = re.sub(r'(?i)\n+\s*\*{0,2}tips\s*tambahan[^\n]*\*{0,2}[\s\S]*$', '', text)
+    text = re.sub(r'\*\*\*', '', text)
+
+    # 6. Susun baris perenggan yang kemas
+    lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
+    cleaned = "\n".join([line for line in lines if line]).strip()
+
+    return cleaned
 
 
-# Panduan Persona Positif Gaya "Brader Din" Khas Instagram
-IG_PERSONA_PROMPT = """
-Anda adalah "Brader Din", pencipta kandungan teknologi dan ulasan perkakasan komputer yang ramah dan berilmu di komuniti Sembang PC & Tech Malaysia.
+def is_valid_ig_caption(text: str) -> bool:
+    """Menyemak kualiti teks bagi mengelakkan teks terputus atau rosak."""
+    if not text or len(text.strip()) < 80:
+        return False
+    if "<pad>" in text.lower() or "<unk>" in text.lower():
+        return False
 
-GAYA PENULISAN INSTAGRAM YANG DIMINATI:
-1. Nada Suara: Santai, mesra komuniti (Bahasa Melayu harian yang kemas, guna panggilan 'bro', 'korang', 'geng tech').
-2. Visual & Formatting: 
-   - Gunakan perenggan pendek yang mudah dibaca di skrin telefon.
-   - Susun ciri utama menggunakan bullet points yang kemas bersama emoji berkaitan.
-   - Sediakan pembuka kata yang menarik minat (Hook).
-3. Pautan & CTA Instagram:
-   - Instagram tidak membenarkan link diklik terus di dalam kapsyen.
-   - Arahkan pembaca dengan mesra ke pautan di Bio profil atau Telegram kita: (Contoh: "🔗 Link pembelian padu abang dah pin di Bio profil!")
-4. Hashtags:
-   - Sertakan 6 hingga 10 hashtag berkaitan teknologi, PC setup, dan gajet Malaysia yang relevan di penghujung kapsyen.
-"""
+    words = [w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', text)]
+    if len(words) < 15:
+        return False
+
+    unique_words = set(words)
+    if len(unique_words) / len(words) < 0.40:
+        return False
+
+    matching_anchors = unique_words.intersection(MALAY_ANCHOR_WORDS)
+    if len(matching_anchors) < 2:
+        return False
+
+    return True
 
 
 class InstagramAIPersona:
-    """Enjin AI untuk menjana kapsyen Instagram affiliate dan lifestyle."""
+    """Enjin AI Persona Instagram berteraskan model OpenRouter / Gemma."""
 
-    def __init__(self, model_name: str = MODEL_NAME):
-        self.model_name = model_name
-        self.model = None
-        if GEMINI_API_KEY:
+    def __init__(self):
+        self.base_url = (os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").strip().rstrip("/")
+        self.model = os.getenv("OPENROUTER_MODEL", "").strip()
+        self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+
+    def _call_openrouter(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+        """Panggilan AI terus ke OpenRouter API dengan kawalan ralat & cubaan semula."""
+        if not self.api_key or not self.model:
+            return None
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json; charset=utf-8",
+            "HTTP-Referer": "https://sembangpctech.local",
+            "X-Title": "Sembang PC & Tech Bot",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt.strip()},
+                {"role": "user", "content": user_prompt.strip()},
+            ],
+            "temperature": 0.65,
+            "max_tokens": 850,
+            "frequency_penalty": 0.0,
+            "presence_penalty": 0.0,
+        }
+
+        for attempt in range(2):
             try:
-                self.model = genai.GenerativeModel(
-                    model_name=self.model_name,
-                    system_instruction=IG_PERSONA_PROMPT
-                )
+                res = requests.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=30)
+                res.encoding = "utf-8"
+                if res.status_code == 200:
+                    data = res.json()
+                    if "choices" in data and len(data["choices"]) > 0:
+                        raw_text = data["choices"][0]["message"]["content"].strip()
+                        cleaned_text = clean_glitches_and_meta_chatter(raw_text)
+                        if is_valid_ig_caption(cleaned_text):
+                            return cleaned_text
             except Exception as e:
-                print(f"⚠️ [Instagram Persona] Amaran inisialisasi AI: {e}")
+                print(f"⚠️ [Instagram AI Attempt {attempt + 1} Error]: {e}")
+
+        return None
 
     def generate_affiliate_caption(self, product_data: Dict[str, Any]) -> str:
-        """
-        Menjana kapsyen ulasan produk racun gajet yang memikat untuk feed Instagram.
-        """
-        title = product_data.get("title", "Gajet Padu Pilihan")
+        """Menjana kapsyen ulasan racun gajet kemas untuk feed Instagram."""
+        title = product_data.get("title", "Gajet Pilihan")
         price = product_data.get("price", "")
         features = product_data.get("features", "")
-        link = product_data.get("affiliate_link", "")
 
-        prompt = f"""
-Sila hasilkan kapsyen hantaran Instagram ulasan produk berbaloi:
+        system_prompt = """
+Anda adalah "Brader Din", pencipta kandungan teknologi dan ulasan perkakasan komputer di komuniti Sembang PC & Tech Malaysia.
 
-Nama Produk: {title}
-Harga/Tawaran: {price}
-Ciri-ciri Utama: {features}
-Pautan Affiliate Asal: {link}
+GAYA BAHASA & STRUKTUR KAPSYEN INSTAGRAM:
+1. Nada: Santai, mesra komuniti PC/tech Malaysia (gunakan panggilan 'korang', 'geng tech', 'memang padu', 'ngam sangat').
+2. Fasa 1 (Hook): Mulakan terus dengan soalan atau situasi setup harian yang menarik minat.
+3. Fasa 2 (Ulasan): Terangkan 3 kelebihan utama produk menggunakan bullet point simbol (•) yang tersusun.
+4. Fasa 3 (Call To Action): Beritahu pembaca bahawa link pembelian rasmi boleh didapati di Bio profil atau Telegram Sembang PC & Tech.
+5. Fasa 4 (Hashtags): Akhiri dengan 6 hingga 8 hashtag teknologi tempatan.
 
-STRUKTUR KANDUNGAN:
-- Hook santai yang menarik perhatian kaki PC & setup meja.
-- Ulasan ringkas kenapa barang ini berbaloi dimiliki / praktikal.
-- 3 ke 4 bullet point kelebihan gajet ini.
-- Call To Action (CTA): Jemput follower semak link pembelian di Bio atau pautan ringkas.
-- 8 hashtag trending teknologi tempatan.
-
-Hasilkan kapsyen yang terus sedia disiarkan tanpa teks pengenalan sistem.
+ARAHAN PANTANGAN KETAT:
+- TERUS TULIS AYAT HANTARAN TANPA sebarang mukadimah (DILARANG: "Yo apa khabar...", "Berikut adalah cadangan kapsyen...").
+- DILARANG letak nota tips tambahan di bahagian bawah.
+- DILARANG guna simbol bukan Rumi atau teks merapu.
 """
-        if not self.model:
-            return self._fallback_affiliate_caption(title, price, link)
+        user_prompt = f"""
+Sila hasilkan kapsyen ulasan Instagram untuk produk ini:
+Nama Produk: {title}
+Harga / Tawaran: {price}
+Ciri-ciri: {features}
 
-        try:
-            response = self.model.generate_content(prompt)
-            caption = response.text.strip()
-            return self._clean_markdown(caption)
-        except Exception as e:
-            print(f"⚠️ [Instagram Persona] Ralat penjanaan kapsyen: {e}")
-            return self._fallback_affiliate_caption(title, price, link)
+Tuliskan teks hantaran lengkap sekarang:
+"""
+        caption = self._call_openrouter(system_prompt, user_prompt)
+        if not caption:
+            price_tag = f"\n💰 Tawaran: {price}" if price else ""
+            caption = (
+                f"Korang yang tengah cari barang baru untuk kemaskan setup, tengok yang ni! ⚡💻\n\n"
+                f"📦 {title}{price_tag}\n\n"
+                f"Kualiti binaan memang padu dan praktikal untuk kegunaan harian. Setup meja nampak makin kemas dan selesa bila ada kelengkapan macam ni.\n\n"
+                f"• Rekaan moden & sedap dipandang\n"
+                f"• Material tahan lasak untuk kegunaan harian\n"
+                f"• Sangat berbaloi untuk nilai harga\n\n"
+                f"🔗 Link pembelian rasmi abang dah pin di Bio profil atau terus ke Telegram Sembang PC & Tech ya geng! 👇\n\n"
+                f"#SembangPCTech #TechMalaysia #PCSetup #DeskSetup #RacunGajet #SetupGoals"
+            )
+        return caption
 
     def generate_lifestyle_caption(self, topic: str, key_points: Optional[str] = None) -> str:
-        """
-        Menjana kapsyen gaya hidup, tips susun atur meja, dan perkongsian IT harian.
-        """
-        prompt = f"""
-Sila hasilkan kapsyen Instagram santai bertemakan gaya hidup teknologi & inspirasi setup meja:
+        """Menjana kapsyen lifestyle & inspirasi setup meja."""
+        system_prompt = """
+Anda adalah "Brader Din", berkongsi inspirasi ruang kerja, desk setup minimalis, dan gaya hidup komputer di Instagram Sembang PC & Tech.
 
-Topik: {topic}
-Poin Tambahan: {key_points or 'Tips meja kemas & produktiviti'}
+GAYA BAHASA & STRUKTUR KAPSYEN INSTAGRAM:
+1. Nada: Santai, tenang, mesra komuniti tech tempatan.
+2. Fasa 1: Pembuka kata yang selari dengan topik dan visual hantaran.
+3. Fasa 2: Penceritaan santai tentang ketenangan ruang kerja yang teratur atau hobi teknologi.
+4. Fasa 3: Satu soalan santai untuk mengajak rakan komuniti berkongsi pendapat di ruang komen.
+5. Fasa 4: 6 hingga 8 hashtag santai setup & tech Malaysia.
 
-STRUKTUR KANDUNGAN:
-- Pembuka kata inspiratif tentang dunia setup & teknologi.
-- Perkongsian santai 3 tips atau pandangan bernas.
-- Soalan santai untuk galakkan follower komen & bersembang.
-- CTA jemput follow @braderdin360 & komuniti Sembang PC & Tech.
-- 6 hingga 8 hashtag santai desk setup & tech Malaysia.
-
-Hasilkan kapsyen kemas yang sedia untuk disiarkan.
+ARAHAN PANTANGAN KETAT:
+- TERUS TULIS AYAT HANTARAN TANPA mukadimah AI (DILARANG: "Yo apa khabar...", "Ini caption...").
+- DILARANG letak bahagian tips tambahan/rekaan kamera di hujung teks.
 """
-        if not self.model:
-            return self._fallback_lifestyle_caption(topic)
+        user_prompt = f"""
+Hasilkan kapsyen Instagram lifestyle bertemakan '{topic}'.
+Konteks / Mood: {key_points or 'Suasana meja kemas dan produktiviti'}
 
-        try:
-            response = self.model.generate_content(prompt)
-            caption = response.text.strip()
-            return self._clean_markdown(caption)
-        except Exception as e:
-            print(f"⚠️ [Instagram Persona] Ralat penjanaan lifestyle: {e}")
-            return self._fallback_lifestyle_caption(topic)
-
-    def _clean_markdown(self, text: str) -> str:
-        """Membersihkan format yang tidak disokong kemas di Instagram."""
-        # Menukar format bold markdown berganda kepada teks biasa/kemas jika perlu
-        text = text.replace("```", "").strip()
-        return text
-
-    def _fallback_affiliate_caption(self, title: str, price: str, link: str) -> str:
-        """Kapsyen simpanan jika tiada sambungan AI."""
-        price_line = f"\n💰 Harga Tawaran: {price}" if price else ""
-        return f"""Racun gajet padu pilihan Brader Din harini! ⚡💻
-
-📦 {title}{price_line}
-
-Setup meja lebih kemas dan produktif bila ada gajet yang memudahkan kerja macam ni. Memang puas hati! 🔥
-
-🔗 Link pembelian rasmi ada di Bio profil atau terus di Telegram Sembang PC & Tech ya geng! 👇
-
-#SembangPCTech #TechMalaysia #PCSetup #RacunGajet #DeskSetup #WorkspaceMalaysia #ShopeeMY #LazadaMY"""
-
-    def _fallback_lifestyle_caption(self, topic: str) -> str:
-        """Kapsyen simpanan lifestyle."""
-        return f"""Inspirasi setup meja & sembang santai hari ini: {topic} 🖥️✨
-
-Meja yang kemas dan pencahayaan yang sedap mata memandang secara automatik buat semangat buat kerja atau layan game makin padu.
-
-Korang jenis suka setup minimalis bersih atau penuh dengan lampu RGB? Cuba drop komen sikit di bawah! 👇
-
-#SembangPCTech #TechMalaysia #DeskSetupGoals #PCGaming #MinimalistDesk #WorkspaceInspiration"""
+Tuliskan teks hantaran lengkap sekarang:
+"""
+        caption = self._call_openrouter(system_prompt, user_prompt)
+        if not caption:
+            caption = (
+                f"Bila ruang kerja kemas dan teratur, rasa tenang sangat nak duduk lama depan skrin. 🖥️✨\n\n"
+                f"Pencahayaan yang sedap mata memandang ditambah pula dengan susun atur meja yang bebas serabut memang buat fokus kerja dan santai jadi lebih nikmat.\n\n"
+                f"Korang jenis suka suasana setup minimalis bersih atau penuh dengan lampu ambient? Cuba kongsikan sikit di ruang komen! 👇\n\n"
+                f"#SembangPCTech #TechMalaysia #DeskSetup #WorkspaceInspiration #MinimalistSetup #PCGaming"
+            )
+        return caption
 
 
-# Instance sedia guna
+# Singleton instance
 instagram_ai = InstagramAIPersona()

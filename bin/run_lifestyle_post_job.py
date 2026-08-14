@@ -18,9 +18,9 @@ else:
 # Import modul tempatan dari folder src
 from src.lifestyle_ai_persona import (
     detect_current_time_slot,
-    generate_lifestyle_theme_keyword,
     generate_lifestyle_story,
 )
+from src.lifestyle_keyword_engine import get_fresh_lifestyle_keyword  # 🌟 ENJIN BARU
 from src.lifestyle_image_fetcher import (
     fetch_similar_theme_images,
     mark_image_id_posted,
@@ -89,13 +89,20 @@ def run_lifestyle_posting_job():
     previous_memories = get_lifestyle_story_memories(redis_url, redis_token, limit=5)
     print(f"  ✅ {len(previous_memories)} ingatan cerita lepas berjaya dimuatkan.")
 
-    # 3. JANA KATA KUNCI INDUK
-    print("\n💡 [STEP 2] AI Persona menjana 1 Kata Kunci Tema Induk Unsplash...")
-    query_keyword = generate_lifestyle_theme_keyword(base_url, model, api_key)
-    print(f"🎯 [KATA KUNCI INDUK]: '{query_keyword}'")
+    # 3. JANA & TAPIS 10 KATA KUNCI DENGAN ENJIN DEDIKASI
+    print("\n💡 [STEP 2] Enjin Kata Kunci meneliti dan menapis kata kunci segar...")
+    query_keyword = get_fresh_lifestyle_keyword(
+        base_url=base_url,
+        model=model,
+        api_key=api_key,
+        redis_url=redis_url,
+        redis_token=redis_token,
+        vector_url=vector_url,
+        vector_token=vector_token
+    )
 
     # 4. TARIK 3 GAMBAR BERTEMA SERUPA DARI UNSPLASH
-    print("\n🌐 [STEP 3] Menarik 3 gambar bertema serupa dari Unsplash API...")
+    print("🌐 [STEP 3] Menarik 3 gambar bertema serupa dari Unsplash API...")
     image_candidates = fetch_similar_theme_images(
         access_key=unsplash_key,
         query_keyword=query_keyword,
@@ -112,8 +119,8 @@ def run_lifestyle_posting_job():
     image_descs = [img["description"] for img in image_candidates]
     photo_ids = [img["photo_id"] for img in image_candidates]
 
-    # 5. AI TECH SPECIALIST JANA PENCERITAAN
-    print("\n✍️ [STEP 4] AI Tech Specialist menjana cerita Facebook...")
+    # 5. AI TECH SPECIALIST JANA PENCERITAAN (DENGAN INGATAN & DESKRIPSI GAMBAR)
+    print("\n✍️ [STEP 4] AI Tech Specialist menjana cerita bersumberkan deskripsi gambar...")
     ai_ok, story_text = generate_lifestyle_story(
         base_url=base_url,
         model=model,
@@ -129,7 +136,7 @@ def run_lifestyle_posting_job():
             "Korang punya setup meja dah sedia untuk aktiviti santai malam ni?"
         )
 
-    # 6. SEMAK KESERUPAAN CERITA DI VECTOR DB
+    # 6. SEMAK KESERUPAAN CERITA DI VECTOR DB (ANTI-DUPLIKASI CERITA 48 JAM)
     if is_similar_lifestyle_story_posted(vector_url, vector_token, story_text):
         print("⚠️ [LIFESTYLE VECTOR] Topik cerita ini dikesan serupa dengan cerita < 48 jam lepas. Menjana alternatif...")
         ai_ok, story_text = generate_lifestyle_story(
@@ -220,7 +227,6 @@ def run_lifestyle_posting_job():
             key_points=f"Mood: {day_mood} | Waktu: {slot_desc}",
         )
 
-        # Guna Carousel jika ada berbilang gambar estetik Unsplash
         if len(image_urls) >= 2:
             res_ig = instagram_bot.post_carousel(
                 image_urls=image_urls,
@@ -238,7 +244,6 @@ def run_lifestyle_posting_job():
             print(f"  ✅ Berjaya dipos ke Instagram Lifestyle! Pautan: {ig_permalink}")
             ig_success = True
 
-            # Hantar kad audit ke Telegram
             if tg_token and tg_chat_id:
                 print("  🔍 Menghantar salinan audit Instagram ke Telegram...")
                 send_instagram_audit_to_telegram(
