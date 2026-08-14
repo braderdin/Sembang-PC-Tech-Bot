@@ -47,7 +47,7 @@ def run_lifestyle_posting_job():
     print("📖 [START] ENJIN PEMPOSAN CERITA HARIAN & LIFESTYLE REEL (AI TECH SPECIALIST)")
     print("=" * 70)
 
-    # Pembacaan daripada Pembolehubah Persekitaran
+    # Pembacaan daripada Pembolehubah Persekitaran (100% Dinamik)
     base_url = os.getenv("OPENROUTER_BASE_URL", "").strip()
     model = os.getenv("OPENROUTER_MODEL", "").strip()
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
@@ -84,7 +84,7 @@ def run_lifestyle_posting_job():
     previous_memories = get_lifestyle_story_memories(redis_url, redis_token, limit=5)
     print(f"  ✅ {len(previous_memories)} ingatan cerita lepas berjaya dimuatkan ke dalam memori AI.")
 
-    # 3. JANA KATA KUNCI INDUK
+    # 3. JANA KATA KUNCI INDUK (PENDEK: 2-3 PERKATAAN)
     print("\n💡 [STEP 2] AI Persona menjana 1 Kata Kunci Tema Induk Unsplash...")
     query_keyword = generate_lifestyle_theme_keyword(base_url, model, api_key)
     print(f"🎯 [KATA KUNCI INDUK]: '{query_keyword}'")
@@ -118,11 +118,15 @@ def run_lifestyle_posting_job():
     )
 
     if not ai_ok or not story_text:
-        story_text = "Salam kawan-kawan! Kopi dah siap, setup meja dah kemas. Semoga hari ini penuh dengan produktiviti untuk kita semua!"
+        story_text = (
+            "Salam kawan-kawan! Selesai urusan seharian di hadapan skrin. "
+            "Bila meja kerja kemas dan susun atur teratur, rasa tenang sikit nak santai rehatkan fikiran. "
+            "Korang punya setup meja dah sedia untuk aktiviti santai malam ni?"
+        )
 
-    # 6. SEMAK KESERUPAAN CERITA DI VECTOR DB
+    # 6. SEMAK KESERUPAAN CERITA DI VECTOR DB (ANTI-DUPLIKASI 48 JAM)
     if is_similar_lifestyle_story_posted(vector_url, vector_token, story_text):
-        print("⚠️ [LIFESTYLE VECTOR] Topik cerita ini didapati terlalu serupa dengan cerita < 48 jam lepas. Menjana semula...")
+        print("⚠️ [LIFESTYLE VECTOR] Topik cerita ini dikesan serupa dengan cerita < 48 jam lepas. Menjana cerita alternatif...")
         ai_ok, story_text = generate_lifestyle_story(
             base_url=base_url,
             model=model,
@@ -167,7 +171,7 @@ def run_lifestyle_posting_job():
             print(f"  ✅ Berjaya dipos ke Facebook Page Feed! (Post ID: {res_fb.get('post_id')})")
             fb_feed_success = True
 
-    # 9. POS KE FACEBOOK REELS
+    # 9. POS KE FACEBOOK REELS (SLIDESHOW VIDEO 9 SAAT + AUDIO)
     if fb_page_id and fb_page_token:
         print("\n🎬 [STEP 7] Pos ke Facebook Reels...")
         sent_reel, res_reel = send_lifestyle_to_facebook_reel(
@@ -180,7 +184,7 @@ def run_lifestyle_posting_job():
             print(f"  ✅ Berjaya dipos ke Facebook Lifestyle Reels! (Video ID: {res_reel.get('video_id')})")
             fb_reel_success = True
 
-    # 10. POS KE THREADS
+    # 10. POS KE THREADS (MIKRO-BLOG CASUAL 1 GAMBAR)
     if threads_user_id and threads_token:
         print("\n🧵 [STEP 8] Pos ke Threads (AI Persona Khas Threads)...")
         threads_custom_caption = generate_threads_lifestyle_caption(

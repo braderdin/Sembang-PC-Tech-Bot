@@ -1,4 +1,5 @@
 import os
+import re
 import random
 import requests
 
@@ -11,6 +12,31 @@ SAFE_FALLBACK_KEYWORDS = [
     "mechanical keyboard",
     "dual monitor workspace"
 ]
+
+def _clean_image_description(raw_desc, fallback_keyword):
+    """
+    Membersihkan teks deskripsi Unsplash daripada metadata kamera,
+    nama jurugambar, dan tag teknikal sebelum disalurkan ke AI.
+    """
+    if not raw_desc:
+        return f"Suasana bertema {fallback_keyword}"
+
+    # Buang tag jurugambar, kamera, resolusi, dan pautan
+    cleaned = re.sub(
+        r'(photo by|shot on|taken by|image by|picture by|photographer|camera|lens|iso\s*\d+|f/\d+(\.\d+)?|unsplash|wallpaper|http\S+|www\S+)[\w\s\.\,\-\_]*',
+        '',
+        str(raw_desc),
+        flags=re.IGNORECASE
+    )
+    # Buang simbol pelik dan ruang kosong berlebihan
+    cleaned = re.sub(r'[\r\n\t]+', ' ', cleaned)
+    cleaned = re.sub(r'[^\w\s\.\,\-\']', '', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    if len(cleaned) < 6:
+        return f"Suasana bertema {fallback_keyword}"
+
+    return cleaned[:120]
 
 def is_image_id_posted(redis_url, redis_token, photo_id):
     """
@@ -86,7 +112,7 @@ def _fetch_from_unsplash_api(access_key, keyword, per_page=15):
 def fetch_similar_theme_images(access_key, query_keyword, redis_url="", redis_token="", count=3):
     """
     Menarik sehingga 'count' (3) gambar bertema serupa daripada Unsplash API.
-    Menyokong kolam 15 gambar dan mekanisma Smart Fallback jika kata kunci utama tiada gambar.
+    Menyokong kolam 15 gambar, pembersihan deskripsi automatik, dan mekanisma Smart Fallback.
     """
     if not access_key:
         print("❌ [UNSPLASH ERROR] Kunci UNSPLASH_ACCESS_KEY tidak ditemui di persekitaran.")
@@ -103,18 +129,14 @@ def fetch_similar_theme_images(access_key, query_keyword, redis_url="", redis_to
         results = _fetch_from_unsplash_api(access_key, active_keyword, per_page=15)
 
     if not results:
-        print(f"❌ [ABORT] Tiada gambar yang sah dijumpai dari Unsplash selepas carian sandaran.")
+        print("❌ [ABORT] Tiada gambar yang sah dijumpai dari Unsplash selepas carian sandaran.")
         return []
 
     collected_images = []
     for photo in results:
         photo_id = photo.get("id")
         img_url = photo.get("urls", {}).get("regular") or photo.get("urls", {}).get("full")
-        raw_desc = (
-            photo.get("alt_description") or 
-            photo.get("description") or 
-            f"Suasana bertema {active_keyword}"
-        )
+        raw_desc = photo.get("alt_description") or photo.get("description") or ""
 
         if not img_url or not photo_id:
             continue
@@ -124,10 +146,13 @@ def fetch_similar_theme_images(access_key, query_keyword, redis_url="", redis_to
             print(f"  ⏭️ [REDIS SKIP] Photo ID '{photo_id}' pernah digunakan < 30 hari lepas.")
             continue
 
+        # Bersihkan deskripsi visual sebelum disimpan
+        clean_desc = _clean_image_description(raw_desc, active_keyword)
+
         collected_images.append({
             "photo_id": photo_id,
             "image_url": img_url,
-            "description": raw_desc,
+            "description": clean_desc,
             "keyword": active_keyword
         })
 
@@ -136,13 +161,13 @@ def fetch_similar_theme_images(access_key, query_keyword, redis_url="", redis_to
 
     # Jika kolam pertama masih tidak mencukupi 3 gambar selepas Redis filter, tambah dari fallback
     if len(collected_images) < count:
-        print(f"⚠️ [UNSPLASH TOP-UP] Memerlukan baki gambar. Menarik kolam tambahan...")
+        print("⚠️ [UNSPLASH TOP-UP] Memerlukan baki gambar. Menarik kolam tambahan...")
         fallback_kw = random.choice([k for k in SAFE_FALLBACK_KEYWORDS if k != active_keyword])
         extra_results = _fetch_from_unsplash_api(access_key, fallback_kw, per_page=15)
         for photo in extra_results:
             photo_id = photo.get("id")
             img_url = photo.get("urls", {}).get("regular") or photo.get("urls", {}).get("full")
-            raw_desc = photo.get("alt_description") or photo.get("description") or f"Suasana bertema {fallback_kw}"
+            raw_desc = photo.get("alt_description") or photo.get("description") or ""
             
             if not img_url or not photo_id:
                 continue
@@ -151,10 +176,12 @@ def fetch_similar_theme_images(access_key, query_keyword, redis_url="", redis_to
             if is_image_id_posted(redis_url, redis_token, photo_id):
                 continue
 
+            clean_desc = _clean_image_description(raw_desc, fallback_kw)
+
             collected_images.append({
                 "photo_id": photo_id,
                 "image_url": img_url,
-                "description": raw_desc,
+                "description": clean_desc,
                 "keyword": fallback_kw
             })
 

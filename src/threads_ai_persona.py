@@ -1,6 +1,31 @@
 import os
 import re
 import requests
+from collections import Counter
+
+# Senarai Kata Dasar Anchor Bahasa Melayu untuk Pengesahan Kualiti Threads
+MALAY_ANCHOR_WORDS = {
+    "yang", "dan", "di", "ke", "kat", "ni", "tu", "dah", "nak", "ada",
+    "kita", "korang", "saya", "buat", "bila", "dengan", "pun", "rasa",
+    "meja", "setup", "pc", "kerja", "santai", "tengok", "dalam", "untuk",
+    "tak", "bukan", "memang", "lagi", "padu", "mantap", "kemas"
+}
+
+def clean_image_context(raw_desc):
+    """
+    Membersihkan deskripsi visual daripada metadata kamera dan teks jurugambar
+    supaya model AI hanya fokus kepada objek / suasana meja kerja.
+    """
+    if not raw_desc:
+        return "Setup ruang kerja komputer dan teknologi"
+
+    cleaned = re.sub(r'(photo by|shot on|taken by|image by|camera|lens|iso\s*\d+|f/\d+(\.\d+)?|unsplash|wallpaper)[\w\s\.\,\-\_]*', '', raw_desc, flags=re.IGNORECASE)
+    cleaned = re.sub(r'[\r\n\t]+', ' ', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    if len(cleaned) < 5:
+        return "Setup ruang kerja komputer dan teknologi"
+    return cleaned[:100]
 
 def clean_threads_text(text):
     """
@@ -11,10 +36,10 @@ def clean_threads_text(text):
         return ""
 
     # 1. Buang token khas LLM
-    text = re.sub(r'<pad>|<unk>|<s>|</s>|\[PAD\]|\[UNK\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'<pad>|<unk>|<s>|</s>|\[PAD\]|\[UNK\]|<\|.*?\|>', '', text, flags=re.IGNORECASE)
 
-    # 2. Buang aksara bukan Rumi / simbol ganjil (contoh: huruf Arab/Gujerat/Jerman)
-    text = re.sub(r'[^\w\s.,!?:;\'"()/\-#@+]', '', text)
+    # 2. Buang aksara bukan Rumi / simbol ganjil
+    text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\s.,!?:;\'"()/\-#@+]', '', text)
 
     # 3. Kemaskan ruang kosong yang bertindih
     lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines()]
@@ -23,12 +48,29 @@ def clean_threads_text(text):
 
 def is_threads_text_valid(text, min_len=40):
     """
-    Memastikan teks dijana dengan kualiti yang sah sebelum dihantar ke Threads.
+    Memastikan teks dijana dengan kualiti yang sah sebelum dihantar ke Threads (Guardrails).
     """
     if not text or len(text.strip()) < min_len:
         return False
     if "<pad>" in text.lower() or "<unk>" in text.lower():
         return False
+
+    # 1. Semak pengulangan perkataan berturut-turut
+    if re.search(r'(\b\w+\b)(?:\s+\1){2,}', text, flags=re.IGNORECASE):
+        return False
+
+    words = [w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', text)]
+    total_words = len(words)
+    if total_words < 8:
+        return False
+
+    # 2. Semakan Kata Asas Bahasa Melayu (Anchor Check)
+    unique_words = set(words)
+    matching_anchors = unique_words.intersection(MALAY_ANCHOR_WORDS)
+    if len(matching_anchors) < 2:
+        print(f"⚠️ [THREADS GUARDRAIL] Kapsyen dikesan bukan Bahasa Melayu natural (Anchor: {len(matching_anchors)}). Ditolak.")
+        return False
+
     return True
 
 # =====================================================================
@@ -37,11 +79,11 @@ def is_threads_text_valid(text, min_len=40):
 def generate_threads_lifestyle_caption(base_url, model, api_key, image_description, slot_desc="Santai Tech", day_mood="Santai"):
     """
     Menjana kapsyen mikro-blog santai untuk Threads (200 - 350 aksara)
-    yang HANYA merujuk kepada 1 gambar utama.
+    yang HANYA merujuk kepada 1 gambar utama dengan kawalan kualiti ketat.
     """
     fallback_lifestyle = (
         "Setup yang kemas macam ni memang buat mood kerja atau santai rasa lebih tenang. "
-        "Bila ruang meja teratur, fikiran pun kurang serabut nak hadap kerja tech seharian. "
+        "Bila ruang meja teratur, fikiran pun kurang serabut nak hadap projek seharian. "
         "Korang punya setup meja jenis minimalis macam ni juga ke?"
     )
 
@@ -53,31 +95,34 @@ def generate_threads_lifestyle_caption(base_url, model, api_key, image_descripti
         "Content-Type": "application/json; charset=utf-8",
     }
 
+    clean_visual = clean_image_context(image_description)
+
     system_prompt = f"""
 Anda ialah seorang AI Tech Specialist di Malaysia yang menulis di Meta Threads (@braderdin360 / Sembang PC & Tech).
-Format penulisan anda ialah MICRO-BLOGGING (Ringkas, Padat, Santai, dan Kelakar).
+Format penulisan anda ialah MIKRO-BLOG (Ringkas, Padat, Santai, dan Spontan).
 
 WAKTU SEMASA: {slot_desc}
 MOOD HARI: {day_mood}
-VISUAL 1 GAMBAR UTAMA: "{image_description}"
+SUASANA GAMBAR UTAMA: "{clean_visual}"
 
 SYARAT PENULISAN THREADS (SANGAT KETAT):
-1. WAJIB rujuk kepada SATU gambar ini sahaja. DILARANG SAMA SEKALI sebut "gambar kedua", "gambar ketiga", atau "album"!
-2. HAD PANJANG TEKS: Antara 200 HINGGA 350 AKSARA SAHAJA.
-3. GAYA BAHASA: Bahasa Melayu santai komuniti tech Malaysia (Contoh: "Kemas betul setup ni...", "Bila meja teratur...", "Rasa tenang nak layan projek...").
-4. DILARANG guna Bahasa Indonesia atau bahasa kaku terjemahan.
-5. Sifar pautan (No links), sifar ajakan membeli (100% sembang santai/lifestyle).
-6. Akhiri dengan 1 soalan santai untuk interaksi pengikut.
+1. BAHASA & TATABAHASA: WAJIB 100% menggunakan Bahasa Melayu santai harian Malaysia (Contoh: "Kemas betul setup ni...", "Bila meja teratur...", "Rasa tenang nak layan game..."). DILARANG campur aduk bahasa asing atau perkataan rojak yang tidak wujud.
+2. FOKUS GAMBAR: Rujuk kepada SATU gambar suasana ini sahaja. DILARANG sebut "gambar kedua", "gambar ketiga", atau "album"!
+3. PANJANG TEKS: Antara 180 HINGGA 320 AKSARA SAHAJA.
+4. Sifar pautan (No links), sifar ajakan membeli produk (100% lifestyle/sembang santai).
+5. Akhiri dengan 1 soalan santai untuk interaksi pengikut di Threads.
 """
 
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt.strip()},
-            {"role": "user", "content": "Tuliskan 1 hantaran Threads yang ringkas dan padat tentang gambar ini."},
+            {"role": "user", "content": "Tuliskan 1 hantaran Threads santai yang ringkas dan padat tentang suasana gambar ini."},
         ],
-        "temperature": 0.70, # Suhu stabil untuk elak percampuran bahasa asing
-        "max_tokens": 300,
+        "temperature": 0.65,
+        "max_tokens": 250,
+        "frequency_penalty": 0.0,
+        "presence_penalty": 0.0
     }
 
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -88,14 +133,16 @@ SYARAT PENULISAN THREADS (SANGAT KETAT):
             res.encoding = "utf-8"
             if res.status_code == 200:
                 data = res.json()
-                raw_text = data["choices"][0]["message"]["content"].strip()
-                cleaned_text = clean_threads_text(raw_text)
+                if "choices" in data and len(data["choices"]) > 0:
+                    raw_text = data["choices"][0]["message"]["content"].strip()
+                    cleaned_text = clean_threads_text(raw_text)
 
-                if is_threads_text_valid(cleaned_text):
-                    # Potong selamat jika terlebih
-                    if len(cleaned_text) > 420:
-                        cleaned_text = cleaned_text[:415] + "..."
-                    return cleaned_text
+                    if is_threads_text_valid(cleaned_text):
+                        if len(cleaned_text) > 380:
+                            cleaned_text = cleaned_text[:375] + "..."
+                        return cleaned_text
+                    else:
+                        print(f"⚠️ [THREADS LIFESTYLE RETRY - ATTEMPT {attempt+1}] Kapsyen Threads tidak melepasi tapisan kualiti.")
         except Exception as e:
             print(f"⚠️ [THREADS LIFESTYLE AI ERROR - ATTEMPT {attempt+1}]: {e}")
 
@@ -106,11 +153,12 @@ SYARAT PENULISAN THREADS (SANGAT KETAT):
 # =====================================================================
 def generate_threads_affiliate_caption(base_url, model, api_key, product_title, product_desc):
     """
-    Menjana ulasan produk pantas untuk Threads (200 - 300 aksara)
+    Menjana ulasan produk pantas untuk Threads (180 - 280 aksara)
     supaya baki aksara muat untuk pautan affiliate di bawah 500 aksara.
     """
+    clean_title = product_title[:50].strip()
     fallback_affiliate = (
-        f"Korang yang tengah cari {product_title[:50]}, barang ni memang padu untuk upgrade setup korang. "
+        f"Korang yang tengah cari {clean_title}, barang ni memang padu untuk upgrade setup meja. "
         "Kualiti mantap dan sangat berbaloi untuk kemaskan ruang kerja!"
     )
 
@@ -129,11 +177,11 @@ PRODUK: {product_title}
 INFO: {product_desc}
 
 SYARAT PENULISAN (SANGAT KETAT):
-1. Tulis ulasan padat antara 180 HINGGA 280 AKSARA SAHAJA.
-2. Fokus kepada 1-2 kelebihan utama produk ini (contoh: selesaikan masalah kabel serabut, kelajuan laju, reka bentuk kemas).
-3. GAYA BAHASA: Santai Malaysia ("Barang padu ni...", "Korang yang nak upgrade...", "Memang berbaloi...").
-4. JANGAN letak pautan/link di dalam teks ini (pautan akan dimasukkan oleh sistem).
-5. Letakkan 2-3 hashtag tech di hujung ayat (Contoh: #TechMalaysia #DeskSetup).
+1. BAHASA: Santai Malaysia ("Barang padu ni...", "Korang yang nak upgrade...", "Memang berbaloi...").
+2. PANJANG TEKS: Antara 160 HINGGA 260 AKSARA SAHAJA.
+3. Fokus kepada 1-2 kelebihan utama produk ini (contoh: selesaikan masalah kabel serabut, kemas meja, reka bentuk minimalis).
+4. DILARANG letak sebarang pautan/link di dalam teks ini.
+5. Letakkan 2 hashtag tech di hujung ayat (Contoh: #TechMalaysia #DeskSetup).
 """
 
     payload = {
@@ -142,8 +190,10 @@ SYARAT PENULISAN (SANGAT KETAT):
             {"role": "system", "content": system_prompt.strip()},
             {"role": "user", "content": "Tuliskan ulasan pantas Threads untuk produk ini."},
         ],
-        "temperature": 0.70,
-        "max_tokens": 250,
+        "temperature": 0.65,
+        "max_tokens": 200,
+        "frequency_penalty": 0.0,
+        "presence_penalty": 0.0
     }
 
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -154,13 +204,14 @@ SYARAT PENULISAN (SANGAT KETAT):
             res.encoding = "utf-8"
             if res.status_code == 200:
                 data = res.json()
-                raw_text = data["choices"][0]["message"]["content"].strip()
-                cleaned_text = clean_threads_text(raw_text)
+                if "choices" in data and len(data["choices"]) > 0:
+                    raw_text = data["choices"][0]["message"]["content"].strip()
+                    cleaned_text = clean_threads_text(raw_text)
 
-                if is_threads_text_valid(cleaned_text):
-                    if len(cleaned_text) > 320:
-                        cleaned_text = cleaned_text[:315] + "..."
-                    return cleaned_text
+                    if is_threads_text_valid(cleaned_text, min_len=30):
+                        if len(cleaned_text) > 300:
+                            cleaned_text = cleaned_text[:295] + "..."
+                        return cleaned_text
         except Exception as e:
             print(f"⚠️ [THREADS AFFILIATE AI ERROR - ATTEMPT {attempt+1}]: {e}")
 
