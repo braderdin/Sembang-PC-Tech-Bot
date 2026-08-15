@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-Instagram AI Persona Engine (Brader Din Style)
+Instagram AI Persona Engine (Brader Din Style - Telegram Funnel Optimized)
 Sembang PC & Tech Ecosystem (100% Dynamic OpenRouter & Glitch-Proof)
+Features:
+- Smart Search Keyword Extraction for Telegram Catalog Bot
+- High-Converting Bio & Telegram Search Call-To-Action (No Broken @ tags)
+- Instagram SEO Optimization (Product title in first 2 lines)
+- Category & Viral Hashtag Strategy (#RacunGajet, #BarangMurahPadu, etc.)
 """
 
 import os
@@ -25,7 +30,7 @@ def clean_glitches_and_meta_chatter(text: str) -> str:
     """
     Membersihkan teks daripada:
     1. Token rosak LLM (<pad>, <unk>).
-    2. Karakter rosak / encoding glitch (mojibake: ð, â, â).
+    2. Karakter rosak / encoding glitch (mojibake: ð, â).
     3. Mukadimah AI ("Berikut adalah...", "**Caption Instagram:**") dan nota tips tambahan.
     """
     if not text:
@@ -56,6 +61,32 @@ def clean_glitches_and_meta_chatter(text: str) -> str:
     cleaned = "\n".join([line for line in lines if line]).strip()
 
     return cleaned
+
+
+def extract_search_keyword(title: str, max_words: int = 3) -> str:
+    """
+    Mengekstrak 2 hingga 3 perkataan terpenting daripada tajuk produk
+    untuk dijadikan kata kunci carian pantas di Telegram Bot.
+    """
+    if not title:
+        return "Gajet"
+
+    clean = re.sub(r'[\[\]\(\)\#\|\/\-\+\:\,\.]', ' ', str(title))
+    words = [w.strip() for w in clean.split() if len(w.strip()) > 1 and not w.strip().isdigit()]
+    
+    stop_words = {
+        'original', 'ready', 'stock', 'new', 'pro', 'set', 'hot', 'offer',
+        'murah', 'padu', 'high', 'quality', 'fast', 'delivery', 'warranty'
+    }
+    
+    filtered = []
+    for w in words:
+        if w.lower() not in stop_words or len(filtered) == 0:
+            filtered.append(w)
+        if len(filtered) >= max_words:
+            break
+            
+    return " ".join(filtered) if filtered else str(title)[:15]
 
 
 def is_valid_ig_caption(text: str) -> bool:
@@ -128,46 +159,61 @@ class InstagramAIPersona:
         return None
 
     def generate_affiliate_caption(self, product_data: Dict[str, Any]) -> str:
-        """Menjana kapsyen ulasan racun gajet kemas untuk feed Instagram."""
+        """
+        Menjana kapsyen ulasan racun gajet padu untuk Instagram
+        dengan Call-To-Action (CTA) tepat ke Link Bio (Sifar Broken Tag).
+        """
         title = product_data.get("title", "Gajet Pilihan")
         price = product_data.get("price", "")
-        features = product_data.get("features", "")
+        category = product_data.get("category", "Gajet & Komputer")
+        search_kw = extract_search_keyword(title)
 
         system_prompt = """
-Anda adalah "Brader Din", pencipta kandungan teknologi dan ulasan perkakasan komputer di komuniti Sembang PC & Tech Malaysia.
+Anda adalah "Brader Din", pencipta kandungan teknologi, ulasan perkakasan komputer, dan barang bajet berkualiti di Instagram Sembang PC & Tech Malaysia.
 
-GAYA BAHASA & STRUKTUR KAPSYEN INSTAGRAM:
-1. Nada: Santai, mesra komuniti PC/tech Malaysia (gunakan panggilan 'korang', 'geng tech', 'memang padu', 'ngam sangat').
-2. Fasa 1 (Hook): Mulakan terus dengan soalan atau situasi setup harian yang menarik minat.
-3. Fasa 2 (Ulasan): Terangkan 3 kelebihan utama produk menggunakan bullet point simbol (•) yang tersusun.
-4. Fasa 3 (Call To Action): Beritahu pembaca bahawa link pembelian rasmi boleh didapati di Bio profil atau Telegram Sembang PC & Tech.
-5. Fasa 4 (Hashtags): Akhiri dengan 6 hingga 8 hashtag teknologi tempatan.
+STRUKTUR WAJIB KAPSYEN INSTAGRAM:
+1. Fasa 1 (Hook & Tajuk Produk SEO):
+   - Mulakan baris pertama dengan hook santai & sebut nama produk dengan jelas di 2 baris terawal.
+2. Fasa 2 (Ulasan Ringkas):
+   - 1 perenggan pendek tentang fungsi dan kenapa barang ini berbaloi dimiliki.
+   - Sertakan 3 kelebihan utama produk menggunakan simbol bullet point (•).
+3. Fasa 3 (Call To Action & Search Keyword Hook - WAJIB):
+   - Ajak pembaca untuk tekan pautan di Bio profil atau cari di Telegram katalog.
+   - Gunakan format ayat ini secara tepat (JANGAN letak simbol '@' sebelum perkataan bot Telegram untuk elak broken tag di Instagram):
+     "👉 Nak link tawaran rasmi? Tekan link di Bio kami (atau buka Telegram Bot: lubuk_barang_murah_padu_bot) dan taip carian: \"[KATA_KUNCI]\" untuk terus dapat kad info & link belian pantas! 👇"
+4. Fasa 4 (Hashtags Rasmi):
+   - Wajib sertakan kombinasi hashtag ini:
+     #RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY #ShopeeMY #SetupMeja
 
 ARAHAN PANTANGAN KETAT:
-- TERUS TULIS AYAT HANTARAN TANPA sebarang mukadimah (DILARANG: "Yo apa khabar...", "Berikut adalah cadangan kapsyen...").
+- DILARANG letak simbol '@' pada perkataan nama bot Telegram (kerana Instagram akan anggap itu akaun IG).
+- DILARANG letak link URL mentah dalam kapsyen (kerana IG tidak boleh klik link).
+- TERUS TULIS AYAT HANTARAN TANPA sebarang mukadimah AI (DILARANG: "Berikut adalah...", "Yo apa khabar...").
 - DILARANG letak nota tips tambahan di bahagian bawah.
-- DILARANG guna simbol bukan Rumi atau teks merapu.
 """
         user_prompt = f"""
-Sila hasilkan kapsyen ulasan Instagram untuk produk ini:
-Nama Produk: {title}
-Harga / Tawaran: {price}
-Ciri-ciri: {features}
+Sila hasilkan kapsyen Instagram untuk produk ini:
+Nama Penuh Produk: {title}
+Kategori: {category}
+Harga / Anggaran: RM {price if price else 'Promosi'}
+Kata Kunci Carian Telegram: {search_kw}
 
-Tuliskan teks hantaran lengkap sekarang:
+Tuliskan kapsyen lengkap sekarang:
 """
         caption = self._call_openrouter(system_prompt, user_prompt)
+        
+        # Fallback Pintar jika API OpenRouter sibuk
         if not caption:
-            price_tag = f"\n💰 Tawaran: {price}" if price else ""
+            price_display = f"\n💰 Anggaran Tawaran: RM {price}" if price else ""
             caption = (
-                f"Korang yang tengah cari barang baru untuk kemaskan setup, tengok yang ni! ⚡💻\n\n"
-                f"📦 {title}{price_tag}\n\n"
-                f"Kualiti binaan memang padu dan praktikal untuk kegunaan harian. Setup meja nampak makin kemas dan selesa bila ada kelengkapan macam ni.\n\n"
-                f"• Rekaan moden & sedap dipandang\n"
-                f"• Material tahan lasak untuk kegunaan harian\n"
-                f"• Sangat berbaloi untuk nilai harga\n\n"
-                f"🔗 Link pembelian rasmi abang dah pin di Bio profil atau terus ke Telegram Sembang PC & Tech ya geng! 👇\n\n"
-                f"#SembangPCTech #TechMalaysia #PCSetup #DeskSetup #RacunGajet #SetupGoals"
+                f"Korang yang tengah cari kelengkapan baru yang padu, tengok yang ni! ⚡\n\n"
+                f"📦 {title}{price_display}\n\n"
+                f"Kualiti binaan memang kemas dan praktikal untuk kegunaan harian. Setup atau ruang bilik korang pasti nampak makin selesa bila ada barang ni.\n\n"
+                f"• Rekaan moden & sedap dipandang mata\n"
+                f"• Material tahan lasak & kualiti terjamin\n"
+                f"• Nilai terbaik untuk bajet korang\n\n"
+                f"👉 Nak link pembelian rasmi? Tekan link di Bio kami (atau buka Telegram Bot: lubuk_barang_murah_padu_bot) dan taip carian: \"{search_kw}\" untuk terus dapat kad info & link belian pantas! 👇\n\n"
+                f"#RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY #ShopeeMY #SetupMeja"
             )
         return caption
 
