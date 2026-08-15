@@ -4,6 +4,7 @@ Dedicated Pexels 9:16 Video Keyword Generation & Deduplication Engine
 Sembang PC & Tech Ecosystem
 Features:
 - 40 Faceless B-Roll Tech Seeds (Strictly no human faces, no sensitive animals)
+- Automatic ASCII Sanitization (Removes mojibake glitch tokens)
 - AI Batch Generation (10 Candidates) with 2-Round Feedback & Retry Loop
 - Redis 5-Day Exact Match Deduplication
 - Upstash Vector 5-Day Semantic Similarity Guardrail (Cosine Similarity >= 0.85)
@@ -28,7 +29,7 @@ load_dotenv()
 # =============================================================================
 PEXELS_TECH_VISUAL_SEEDS = [
     "mechanical keyboard typing close up",
-    "rgb gaming pc fans",
+    "rgb gaming pc cooling fans",
     "cable management desk closeup",
     "coding dark screen terminal",
     "minimalist workspace aesthetic desk",
@@ -70,21 +71,29 @@ PEXELS_TECH_VISUAL_SEEDS = [
 ]
 
 
+def sanitize_keyword(kw: str) -> str:
+    """Membersihkan aksara rosak mojibake / bukan ASCII daripada kata kunci AI."""
+    if not kw:
+        return ""
+    # Buang aksara bukan abjad/nombor standard
+    clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', str(kw))
+    # Cantumkan ruang kosong berlebihan
+    words = [w.strip() for w in clean.split() if len(w.strip()) > 1]
+    return " ".join(words[:4]).lower().strip()
+
+
 def generate_10_pexels_keyword_candidates(
     base_url: str,
     model: str,
     api_key: str,
     rejected_keywords: Optional[List[str]] = None,
 ) -> List[str]:
-    """
-    Menjana 10 calon kata kunci carian video Pexels vertikal (2-3 perkataan Bahasa Inggeris).
-    Menetapkan sekatan ketat: TIADA MUKA MANUSIA & TIADA HAIWAN SENSITIF.
-    """
+    """Menjana 10 calon kata kunci carian video Pexels bebas muka dan bersih dari sebarang glitch."""
     slot_id, slot_desc, day_mood, _ = detect_reel_time_slot()
     sampled_seeds = random.sample(PEXELS_TECH_VISUAL_SEEDS, min(5, len(PEXELS_TECH_VISUAL_SEEDS)))
 
     if not base_url or not model or not api_key:
-        return random.sample(PEXELS_TECH_VISUAL_SEEDS, 10)
+        return [sanitize_keyword(k) for k in random.sample(PEXELS_TECH_VISUAL_SEEDS, 10)]
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -109,9 +118,10 @@ MOOD HARI INI: {day_mood}
 CONTOH INSPIRASI: {', '.join(sampled_seeds)}
 {feedback_context}
 PANTANGAN MUTLAK (STRICT NEGATIVE CONSTRAINTS):
-1. DILARANG SAMA SEKALI menjana kata kunci yang melibatkan muka manusia, orang, model, atau wanita/lelaki (DILARANG: man, woman, person, girl, face, portrait, model, selfie).
+1. DILARANG SAMA SEKALI menjana kata kunci yang melibatkan muka manusia, gamer, model, streamer, atau wanita/lelaki (DILARANG: man, woman, person, girl, face, portrait, model, gamer, streamer).
 2. DILARANG menjana perkataan haiwan sensitif (DILARANG: dog, puppy, pig, pork).
-3. HANYA fokus kepada B-Roll objek (keyboard, pc build, monitors, cables, desk, coffee, ambient light, circuit board, terminal screen, cat sleeping).
+3. HANYA fokus kepada B-Roll objek & sudut POV (keyboard, pc build, monitors, cables, desk, coffee, ambient light, circuit board, terminal screen, cat sleeping).
+4. Pastikan teks adalah abjad Bahasa Inggeris tulen (Sifar simbol pelik).
 
 TUGAS ANDA:
 Hasilkan TEPAT 10 kata kunci carian video Pexels dalam Bahasa Inggeris (Short search query, 2-3 perkataan sahaja).
@@ -141,15 +151,15 @@ FORMAT JAWAPAN (JSON ARRAY SAHAJA):
                     candidates = json.loads(match.group(0))
                     cleaned = []
                     for kw in candidates:
-                        kw_clean = " ".join(str(kw).strip().split()[:3])
-                        if len(kw_clean) >= 4:
-                            cleaned.append(kw_clean.lower())
+                        sanitized_kw = sanitize_keyword(kw)
+                        if len(sanitized_kw) >= 5:
+                            cleaned.append(sanitized_kw)
                     if len(cleaned) >= 5:
                         return cleaned
     except Exception as e:
         print(f"⚠️ [Pexels Keyword Batch Generation Warn]: {e}")
 
-    return random.sample(PEXELS_TECH_VISUAL_SEEDS, 10)
+    return [sanitize_keyword(k) for k in random.sample(PEXELS_TECH_VISUAL_SEEDS, 10)]
 
 
 def get_fresh_pexels_reel_keyword(
@@ -161,11 +171,7 @@ def get_fresh_pexels_reel_keyword(
     vector_url: str,
     vector_token: str,
 ) -> str:
-    """
-    Menjana kata kunci video Pexels dengan sistem 2 Pusingan (Feedback & Retry Loop),
-    menapis melalui Redis (5 hari) & Vector DB (85% keserupaan dalam 5 hari),
-    dan mengembalikan 1 kata kunci terbaik yang disahkan 100% segar.
-    """
+    """Menjana kata kunci Pexels segar dengan pembersihan abjad dan tapisan Redis/Vector 5-hari."""
     selected_keyword = None
     all_rejected_keywords = []
 
@@ -235,7 +241,7 @@ def get_fresh_pexels_reel_keyword(
 
     if not selected_keyword:
         print("\n⚠️ [KEYWORD FALLBACK] Semua calon Pusingan 1 & 2 dalam tempoh bertenang. Memilih tema sandaran selamat...")
-        selected_keyword = random.choice(PEXELS_TECH_VISUAL_SEEDS)
+        selected_keyword = sanitize_keyword(random.choice(PEXELS_TECH_VISUAL_SEEDS))
 
     save_reel_keyword_to_redis(redis_url, redis_token, selected_keyword)
     save_reel_keyword_to_vector(vector_url, vector_token, selected_keyword)

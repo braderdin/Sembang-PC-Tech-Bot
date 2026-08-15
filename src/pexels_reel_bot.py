@@ -4,10 +4,10 @@ Dedicated Facebook Pexels Video Reels Engine
 Sembang PC & Tech Ecosystem
 Features:
 - 1-API Call Pexels Batch Fetch (20 Videos) & Redis 30-Day Duplicate Filtering
-- Strict Facial & Sensitive Content Filter (No human faces, no sensitive animals)
+- Comprehensive Facial & Sensitive Filter (Rejects all human faces, gamers, streamers, selfies)
 - High-Performance MoviePy 9:16 Stitching (1080x1920, H.264/AAC, 21-24 Saat)
-- Local Background Music Injection (assets/music/)
-- Meta Graph API Video Reels Publisher with Comprehensive Error Diagnostics
+- Local Background Music Ingestion with Clean Title Extraction
+- Meta Graph API Video Reels Publisher with Comprehensive Diagnostics
 """
 
 import os
@@ -28,26 +28,29 @@ from src.pexels_redis_db import is_pexels_video_posted
 
 GRAPH_BASE_URL = "https://graph.facebook.com/v26.0"
 
-# Senarai kata kunci dilarang (Muka orang, model, selfie, haiwan sensitif)
+# Senarai kata kunci dilarang ketat (Muka manusia, gamer, model, selfie, haiwan sensitif)
 FORBIDDEN_VIDEO_KEYWORDS = [
-    "man", "men", "woman", "women", "girl", "boy", "person", "people",
-    "face", "portrait", "model", "selfie", "vlog", "human", "posing",
-    "lady", "guy", "female", "male", "looking at camera", "smile",
+    # Manusia & Watak
+    "man", "men", "woman", "women", "girl", "girls", "boy", "boys", "person", "people",
+    "lady", "guy", "guys", "female", "male", "human", "adult", "child", "kid", "teen", "teenager",
+    # Muka, Potret & Ekspresi
+    "face", "faces", "portrait", "selfie", "vlog", "model", "posing", "smile", "smiling",
+    "looking", "eyes", "head", "headshot", "profile", "closeup-of-face",
+    # Gamer, Streamer & Pekerja Berwajah
+    "gamer", "gamers", "player", "players", "streamer", "streamers", "influencer", "creator",
+    "actor", "worker", "programmer-face",
+    # Haiwan Sensitif
     "dog", "dogs", "puppy", "puppies", "canine",
     "pig", "pigs", "pork", "swine", "boar"
 ]
 
 
 def is_video_safe_and_faceless(video_data: Dict[str, Any]) -> bool:
-    """
-    Menyemak URL slug, tajuk, dan tag video Pexels bagi memastikan
-    tiada wajah manusia atau kandungan sensitif.
-    """
+    """Menyemak URL slug dan teks video Pexels bagi menolak sebarang klip berwajah manusia."""
     video_url = str(video_data.get("url", "")).lower()
     
-    # Periksa perkataan pada slug URL (contoh: /video/woman-holding-laptop-8087083/)
     for bad_word in FORBIDDEN_VIDEO_KEYWORDS:
-        # Padanan perkataan dengan sempadan simbol/tanda sempang
+        # Padanan sempadan perkataan (mengesan '-gamer-', '_man_', '/woman/')
         pattern = rf'(?:^|[\-_/]){re.escape(bad_word)}(?:$|[\-_/])'
         if re.search(pattern, video_url):
             return False
@@ -63,10 +66,7 @@ def fetch_and_filter_pexels_videos(
     needed_count: int = 3,
     batch_size: int = 20,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """
-    Menghantar 1 permintaan API ke Pexels (per_page=20),
-    menapis video muka manusia & haiwan sensitif, serta menapis video berulang (Redis 30-Hari).
-    """
+    """Menghantar 1 permintaan API ke Pexels (per_page=20) dan menapis kandungan selamat serta segar."""
     print(f"\n📡 [PEXELS API] Menghantar 1 request (per_page={batch_size}) carian video: '{query}'...")
 
     if not api_key:
@@ -103,7 +103,7 @@ def fetch_and_filter_pexels_videos(
             # 1. Tapisan Muka Orang & Haiwan Sensitif
             if not is_video_safe_and_faceless(vid):
                 vid_slug = vid.get("url", "").split("/")[-2] if "/" in vid.get("url", "") else vid_id
-                print(f"  🚫 [FACE/SENSITIVE SKIP] ID {vid_id} ditolak (Dikesan muka/manusia: '{vid_slug}').")
+                print(f"  🚫 [FACE/SENSITIVE SKIP] ID {vid_id} ditolak (Dikesan manusia/muka: '{vid_slug}').")
                 continue
 
             # 2. Semak Penjara 30 Hari Redis
@@ -112,7 +112,7 @@ def fetch_and_filter_pexels_videos(
                 skipped_ids.append(vid_id)
                 continue
 
-            # 3. Cari fail MP4 dengan nisbah menegak (height >= width)
+            # 3. Cari fail MP4 vertikal (height >= width)
             best_file = None
             for f in files:
                 if f.get("file_type") == "video/mp4":
@@ -149,7 +149,7 @@ def fetch_and_filter_pexels_videos(
 
 
 def download_video_clip(url: str, filename_prefix: str = "clip") -> str:
-    """Memuat turun fail video MP4 dari URL ke fail sementara tempatan."""
+    """Memuat turun fail video MP4 dari URL ke fail sementara."""
     try:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, stream=True, timeout=30)
         if res.status_code == 200:
@@ -160,24 +160,25 @@ def download_video_clip(url: str, filename_prefix: str = "clip") -> str:
             temp_file.close()
             return temp_file.name
     except Exception as e:
-        print(f"  ⚠️ Ralat muat turun video dari {url[:40]}...: {e}")
+        print(f"  ⚠️ Ralat muat turun video: {e}")
     return ""
 
 
-def get_local_music_clip(music_dir: Path, target_duration: int = 24):
-    """Mengambil dan memotong fail audio rawak daripada folder assets/music/."""
+def get_local_music_clip(music_dir: Path, target_duration: int = 24) -> Tuple[Optional[Any], str]:
+    """Mengambil audio rawak daripada folder assets/music/ dan memulangkan clip berserta tajuk trek bersih."""
     if not music_dir.exists():
         music_dir.mkdir(parents=True, exist_ok=True)
-        return None
+        return None, "Original Audio"
 
     audio_files = [f for f in os.listdir(music_dir) if f.lower().endswith((".mp3", ".wav", ".m4a", ".mp4"))]
     if not audio_files:
         print("  ⚠️ Tiada fail audio di assets/music/. Video dijana tanpa lagu latar.")
-        return None
+        return None, "Original Audio"
 
-    selected = random.choice(audio_files)
-    song_path = str(music_dir / selected)
-    print(f"  🎵 [AUDIO] Menggunakan lagu latar: '{selected}'")
+    selected_file = random.choice(audio_files)
+    clean_title = re.sub(r'[_\-]+', ' ', os.path.splitext(selected_file)[0]).strip().title()
+    song_path = str(music_dir / selected_file)
+    print(f"  🎵 [AUDIO] Menggunakan lagu latar: '{selected_file}' (Tajuk: {clean_title})")
 
     try:
         audio = AudioFileClip(song_path)
@@ -185,25 +186,31 @@ def get_local_music_clip(music_dir: Path, target_duration: int = 24):
         end = start + target_duration
 
         if hasattr(audio, "subclipped"):
-            return audio.subclipped(start, end)
-        return audio.subclip(start, end)
+            cut_audio = audio.subclipped(start, end)
+        else:
+            cut_audio = audio.subclip(start, end)
+
+        return cut_audio, clean_title
     except Exception as e:
         print(f"  ⚠️ Ralat memproses audio latar: {e}")
-        return None
+        return None, "Original Audio"
 
 
 def render_stitched_reel_video(
     video_items: List[Dict[str, Any]],
     music_dir: Path,
     single_clip_duration: int = 8,
-) -> Optional[str]:
+) -> Tuple[Optional[str], str, int]:
     """
     Mencantumkan 3 klip video menjadi 1 video Reel vertikal (1080x1920, 21–24 saat)
     berserta trek audio AAC berkualiti tinggi.
+    Memulangkan: (output_video_path, music_title, total_duration)
     """
     print(f"\n🎬 [MOVIEPY] Memulakan proses cantuman {len(video_items)} klip video...")
     downloaded_paths = []
     loaded_clips = []
+    selected_music_title = "Original Audio"
+    total_duration = 24
 
     try:
         for idx, item in enumerate(video_items, 1):
@@ -225,7 +232,7 @@ def render_stitched_reel_video(
                 else:
                     clip = clip.set_audio(None)
 
-                # Standardkan resolusi ke 1080x1920 (9:16)
+                # Standardkan resolusi 1080x1920 (9:16)
                 if hasattr(clip, "resized"):
                     clip = clip.resized((1080, 1920))
                 elif hasattr(clip, "resize"):
@@ -235,7 +242,7 @@ def render_stitched_reel_video(
 
         if not loaded_clips:
             print("❌ Tiada klip video yang berjaya dimuatkan.")
-            return None
+            return None, selected_music_title, 0
 
         # Cantumkan klip-klip
         final_video = concatenate_videoclips(loaded_clips, method="compose")
@@ -243,7 +250,7 @@ def render_stitched_reel_video(
         print(f"  ⏱️ Jumlah durasi Reel: {total_duration} saat.")
 
         # Pasangkan muzik latar
-        bg_audio = get_local_music_clip(music_dir, target_duration=total_duration)
+        bg_audio, selected_music_title = get_local_music_clip(music_dir, target_duration=total_duration)
         if bg_audio:
             if hasattr(final_video, "with_audio"):
                 final_video = final_video.with_audio(bg_audio)
@@ -272,7 +279,7 @@ def render_stitched_reel_video(
         if bg_audio:
             bg_audio.close()
 
-        return output_path
+        return output_path, selected_music_title, total_duration
 
     finally:
         for dp in downloaded_paths:
@@ -289,9 +296,7 @@ def upload_reel_to_facebook(
     video_path: str,
     caption: str,
 ) -> Tuple[bool, Dict[str, Any]]:
-    """
-    Memuat naik video MP4 ke Facebook Reels via Meta Video Reels Publishing API.
-    """
+    """Memuat naik video MP4 ke Facebook Reels via Meta Video Reels Publishing API."""
     if not page_id or not page_token:
         return False, {"error": "Kunci FACEBOOK_PAGE_ID atau FACEBOOK_PAGE_ACCESS_TOKEN tiada."}
 
@@ -299,7 +304,7 @@ def upload_reel_to_facebook(
     start_url = f"{GRAPH_BASE_URL}/{page_id}/video_reels"
 
     try:
-        # Fasa 1: Mula Sesi (upload_phase = start)
+        # Fasa 1: Mula Sesi
         print("  🎬 [REEL STEP 1] Memulakan sesi muat naik Facebook Reel...")
         res_start = requests.post(
             start_url,
@@ -316,7 +321,7 @@ def upload_reel_to_facebook(
         upload_url = start_json["upload_url"]
         print(f"  ✅ [REEL STEP 1 SUCCESS] Video ID: {video_id}")
 
-        # Fasa 2: Upload Binary Video (Rupload Server)
+        # Fasa 2: Upload Binary Video
         print("  🎬 [REEL STEP 2] Memuat naik Binary Video ke Meta Rupload Server...")
         with open(video_path, "rb") as vf:
             video_data = vf.read()
@@ -334,7 +339,7 @@ def upload_reel_to_facebook(
 
         print("  ✅ [REEL STEP 2 SUCCESS] Muat naik binary video selesai!")
 
-        # Fasa 3: Terbitkan Reel (upload_phase = finish)
+        # Fasa 3: Terbitkan Reel
         print("  🎬 [REEL STEP 3] Menerbitkan Facebook Reel...")
         finish_payload = {
             "upload_phase": "finish",

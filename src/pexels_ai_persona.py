@@ -5,6 +5,7 @@ Sembang PC & Tech Ecosystem (100% Dynamic OpenRouter & Glitch-Proof)
 Features:
 - Micro-Hook & High-Engagement Question Generator for Short Video Reels
 - Dynamic Malaysian Time-Slot & Mood Awareness (MYT = UTC+8)
+- Background Music Integration (AI weaves the track title naturally into the caption)
 - Anti-Glitch & Strict Malay Language Anchor Guardrails
 - 2-Attempt Auto-Retry Loop with Clean Fallback
 """
@@ -29,51 +30,34 @@ MALAY_ANCHOR_WORDS = {
 
 
 def clean_glitches_and_meta_chatter(text: str) -> str:
-    """
-    Membersihkan teks daripada:
-    1. Token rosak LLM (<pad>, <unk>).
-    2. Simbol mojibake / glitch encoding.
-    3. Mukadimah AI ("Berikut adalah...", "**Kapsyen:**") dan nota tips tambahan.
-    """
+    """Membersihkan token LLM, simbol rosak, dan mukadimah bot."""
     if not text:
         return ""
 
-    # 1. Buang token khas LLM
     text = re.sub(r'<pad>|<unk>|<s>|</s>|\[PAD\]|\[UNK\]|<\|.*?\|>', '', text, flags=re.IGNORECASE)
-
-    # 2. Buang simbol mojibake / glitch encoding
     text = re.sub(r'[ðâ][\x80-\xbf]{1,4}', '', text)
     text = re.sub(r'[\x80-\x9f]', '', text)
 
-    # 3. Standardkan simbol bullet point
     special_bullets = ["❖", "◆", "◇", "►", "•", "▪", "▲", "★", "➡", "➢"]
     for sym in special_bullets:
         text = text.replace(sym, "-")
 
-    # 4. Buang mukadimah AI di awal teks
     text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption)[^\n]*?\n+', '', text)
     text = re.sub(r'(?i)\*\*caption\s*(?:reels?)?\s*:\*\*', '', text)
-
-    # 5. Buang bahagian "Tips Tambahan" di penghujung teks
     text = re.sub(r'(?i)\n+\s*\*{0,2}tips\s*tambahan[^\n]*\*{0,2}[\s\S]*$', '', text)
     text = re.sub(r'\*\*\*', '', text)
 
-    # 6. Susun baris perenggan yang kemas
     lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
     return "\n".join([line for line in lines if line]).strip()
 
 
 def is_valid_reel_caption(text: str) -> bool:
-    """
-    Menyemak kualiti teks bagi memastikan kapsyen Reel ringkas,
-    menggunakan Bahasa Melayu semula jadi, dan bebas gelung autoregresif.
-    """
+    """Menyemak kualiti teks bagi memastikan kapsyen Reel ringkas dan semula jadi."""
     if not text or len(text.strip()) < 50:
         return False
     if "<pad>" in text.lower() or "<unk>" in text.lower():
         return False
 
-    # 1. Semak Pengulangan Berturut-turut
     if re.search(r'(\b\w+\b)(?:\s+\1){2,}', text, flags=re.IGNORECASE):
         return False
 
@@ -82,18 +66,15 @@ def is_valid_reel_caption(text: str) -> bool:
     if total_words < 10:
         return False
 
-    # 2. Semak Nisbah Kepelbagaian Perkataan (Unique Words Ratio)
     unique_words = set(words)
     if len(unique_words) / total_words < 0.40:
         return False
 
-    # 3. Semak Kekerapan Perkataan Tunggal
     word_counts = Counter(words)
     for word, count in word_counts.items():
         if len(word) >= 4 and (count / total_words) > 0.20:
             return False
 
-    # 4. Semakan Pengesahan Bahasa Melayu (Malay Anchor Check)
     matching_anchors = unique_words.intersection(MALAY_ANCHOR_WORDS)
     if len(matching_anchors) < 2:
         return False
@@ -102,9 +83,7 @@ def is_valid_reel_caption(text: str) -> bool:
 
 
 def detect_reel_time_slot() -> Tuple[str, str, str, float]:
-    """
-    Mengenal pasti slot masa semasa dan mood hari mengikut zon masa Malaysia (MYT = UTC+8).
-    """
+    """Mengenal pasti slot masa semasa dan mood hari mengikut zon masa Malaysia (MYT = UTC+8)."""
     myt_time = datetime.now(timezone.utc) + timedelta(hours=8)
     hour = myt_time.hour
     day_name = myt_time.strftime("%A")
@@ -179,12 +158,14 @@ class PexelsAIPersona:
     def generate_reel_caption(
         self,
         topic_keyword: str,
+        music_title: Optional[str] = None,
+        video_duration: Optional[int] = None,
         previous_memories: Optional[List[str]] = None,
         slot_override: Optional[str] = None,
     ) -> str:
         """
-        Menjana kapsyen pendek (*micro-hook*) khusus untuk video Facebook Reels
-        dengan fokus mencetuskan interaksi di ruangan komen.
+        Menjana kapsyen pendek (*micro-hook*) selepas video siap dirender.
+        AI Persona menyuntik tajuk lagu latar ke dalam ayat untuk menghidupkan suasana.
         """
         slot_id, slot_desc, day_mood, temp = detect_reel_time_slot()
         if slot_override:
@@ -198,32 +179,45 @@ INGATAN REELS LEPAS (JANGAN ULANG SOALAN ATAU AYAT SAMA):
 {formatted_memories}
 """
 
+        has_custom_music = music_title and music_title not in ["Original Audio", ""]
+        music_guidance = (
+            f"Video ini diiringi lagu latar bertajuk '{music_title}'. "
+            f"Suntik tajuk lagu ini secara santai dalam pembuka ayat (contoh: 'Layan visual ni sambil layan trek {music_title}...')."
+            if has_custom_music
+            else "Fokus pada visual estetik dan suasana tenang ruang kerja."
+        )
+
+        dur_info = f"\nDURASI VIDEO: {video_duration} saat" if video_duration else ""
+
         system_prompt = f"""
-Anda adalah "Brader Din", pencipta kandungan Facebook Reels di komuniti Sembang PC & Tech Malaysia.
-Video Reels ini memaparkan visual estetik bertemakan: '{topic_keyword}'.
+Anda adalah "Brader Din", pencipta kandungan Facebook Reels, Instagram Reels & Threads di komuniti Sembang PC & Tech Malaysia.
+Video Reels pendek 9:16 telah siap dibina dengan spesifikasi:
+- Visual Tema Estetik: '{topic_keyword}'
+- {music_guidance}{dur_info}
 
 WAKTU HANTARAN (MALAYSIA): {slot_desc}
 MOOD HARI INI: {day_mood}
 {memory_context}
 PANDUAN PENULISAN REELS (SANGAT KETAT):
-1. Panjang Kapsyen: WAJIB PENDEK (Maksimum 250 aksara) kerana video Reels memerlukan teks ringkas yang pantas dibaca penonton.
-2. Fasa 1 (Hook Pantas): 1 atau 2 ayat santai tentang visual video tech ini.
+1. Panjang Kapsyen: WAJIB PENDEK (Maksimum 250 aksara) kerana penonton perlukan teks pantas dibaca.
+2. Fasa 1 (Hook Pantas): 1 atau 2 ayat santai tentang visual teknologi ini berserta sebutan santai trek lagu latar.
 3. Fasa 2 (Call to Engagement): 1 soalan santai & menarik untuk mengajak penonton berbalas komen (contoh: bandingkan cita rasa setup, switch keyboard, atau cara kerja).
 4. Fasa 3 (Hashtags): Akhiri dengan 4 hingga 6 hashtag relevan (#SembangPCTech #TechMalaysia #ReelsMalaysia #PCSetup #Workspace).
-5. DILARANG meletakkan link pautan belian (Reel ini adalah kandungan lifestyle / engagement organik).
+5. DILARANG meletakkan link pautan belian.
 6. DILARANG sebarang mukadimah AI (TERUS TULIS AYAT KANDUNGAN).
 """
 
         user_prompt = f"""
-Hasilkan kapsyen Facebook Reel bertemakan visual '{topic_keyword}'.
+Hasilkan kapsyen Reel bertemakan visual '{topic_keyword}'.
 Tuliskan teks kapsyen lengkap sekarang:
 """
 
         caption = self._call_openrouter(system_prompt, user_prompt, temperature=temp)
         if not caption:
+            music_mention = f" sambil layan trek '{music_title}'" if has_custom_music else ""
             caption = (
-                f"Bila susun atur meja kemas dan visual setup sedap mata memandang, semangat nak buat kerja terus naik level. ✨🖥️\n\n"
-                f"Korang jenis suka setup minimalis ringkas atau penuh dengan lampu ambient waktu malam? Cuba kongsikan sikit di ruang komen! 👇\n\n"
+                f"Bila susun atur meja kemas dan visual setup sedap mata memandang{music_mention}, semangat nak fokus terus naik level. ✨🖥️\n\n"
+                f"Korang jenis suka setup minimalis ringkas atau penuh dengan lampu ambient? Cuba kongsikan sikit di ruang komen! 👇\n\n"
                 f"#SembangPCTech #TechMalaysia #ReelsMalaysia #PCSetup #WorkspaceInspiration"
             )
 

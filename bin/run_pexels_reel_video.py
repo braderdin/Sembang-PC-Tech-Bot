@@ -2,13 +2,13 @@
 """
 Master Execution Runner for Pexels 9:16 Video Reels (Facebook, Instagram & Threads)
 Sembang PC & Tech Ecosystem (2x Daily)
-Workflow:
+Optimized Execution Flow:
 1. Detect Malaysian Time Slot & Load 5 Recent Memories from Redis.
-2. AI Generates 10 Candidates -> Filters via Redis 5-Day & Vector DB 5-Day Guardrails.
-3. 1 API Call to Pexels (per_page=20) -> Strict Faceless Filter -> Redis 30-Day Duplicate Filtering.
-4. AI Persona Generates Micro-Hook Reel Caption.
-5. Vector DB Checks Caption Semantic Similarity (5-Day Window).
-6. MoviePy Stitches 3 Clips (21-24s, 1080x1920) + Local Background Music (1-Render).
+2. AI Generates 10 Candidates -> Filters via Redis 5-Day & Vector DB 5-Day Guardrails -> 1 Keyword Selected.
+3. 1 API Call to Pexels (per_page=20) -> Strict Faceless Filter -> Redis 30-Day Duplicate Filtering -> Pick 3 Clips.
+4. [RENDER DAHULU] MoviePy stitches 3 clips (21-24s, 1080x1920) + local audio from assets/music/.
+5. [AI JANA AYAT SELEPAS RENDER] AI Persona generates caption with full video & music metadata.
+6. Vector DB checks caption semantic similarity (5-day window) with auto-retry loop.
 7. Publish to Facebook Reels (Meta Graph API).
 8. Publish to Instagram Reels (@braderdin360) + Send Telegram Audit.
 9. Publish to Threads (@braderdin360 via Backblaze B2 Signed Storage) + Send Telegram Audit.
@@ -52,7 +52,7 @@ from src.pexels_vector_db import (
 
 def run_pexels_reel_video_job():
     print("\n" + "=" * 70)
-    print("🎬 [START] ENJIN PEMPOSAN VIDEO REELS (FB + IG + THREADS 9:16)")
+    print("🎬 [START] ENJIN PEMPOSAN VIDEO REELS (RENDER DAHULU ➔ AYAT AI ➔ POST)")
     print("=" * 70)
 
     # 1. Baca Konfigurasi Persekitaran
@@ -118,26 +118,9 @@ def run_pexels_reel_video_job():
 
     video_ids = [v["id"] for v in selected_videos]
 
-    # 6. AI Persona Jana Kapsyen Micro-Hook Reels
-    print("\n✍️ [STEP 4] AI Tech Specialist menjana kapsyen micro-hook Reels...")
-    caption_text = pexels_ai.generate_reel_caption(
-        topic_keyword=query_keyword,
-        previous_memories=previous_memories,
-    )
-
-    # 7. Semak Keserupaan Kapsyen di Vector DB (Window 5 Hari / Cosine >= 0.85)
-    if is_similar_reel_story_posted(vector_url, vector_token, caption_text):
-        print("⚠️ [PEXELS REEL VECTOR] Topik kapsyen serupa dikesan (< 5 hari lepas). Menjana alternatif...")
-        caption_text = pexels_ai.generate_reel_caption(
-            topic_keyword=query_keyword,
-            previous_memories=previous_memories,
-        )
-
-    print(f"\n✅ [KAPSYEN AI REELS]:\n{caption_text}\n")
-
-    # 8. MoviePy Render Video Reel (21-24s, 1080x1920) + Lagu Latar
-    print("🎬 [STEP 5] Membina video Reel MP4 berserta audio latar...")
-    rendered_video_path = render_stitched_reel_video(
+    # 6. [RENDER DAHULU] MoviePy Membina Video MP4 + Pilih Audio Latar
+    print("\n🎬 [STEP 4] [RENDER DAHULU] Membina video Reel MP4 berserta audio latar...")
+    rendered_video_path, music_title, video_duration = render_stitched_reel_video(
         video_items=selected_videos,
         music_dir=music_dir,
         single_clip_duration=8,
@@ -147,13 +130,34 @@ def run_pexels_reel_video_job():
         print("❌ [ABORT] Gagal menjana fail video akhir.")
         return
 
+    # 7. [AI JANA AYAT SELEPAS RENDER] AI Menjana Kapsyen Berdasarkan Video Siap
+    print(f"\n✍️ [STEP 5] [AI JANA AYAT] Menjana kapsyen micro-hook (Visual: '{query_keyword}', Muzik: '{music_title}', Durasi: {video_duration}s)...")
+    caption_text = pexels_ai.generate_reel_caption(
+        topic_keyword=query_keyword,
+        music_title=music_title,
+        video_duration=video_duration,
+        previous_memories=previous_memories,
+    )
+
+    # 8. Semak Keserupaan Kapsyen di Vector DB (Window 5 Hari / Cosine >= 0.85)
+    if is_similar_reel_story_posted(vector_url, vector_token, caption_text):
+        print("⚠️ [PEXELS REEL VECTOR] Topik kapsyen serupa dikesan (< 5 hari lepas). Menjana alternatif...")
+        caption_text = pexels_ai.generate_reel_caption(
+            topic_keyword=query_keyword,
+            music_title=music_title,
+            video_duration=video_duration,
+            previous_memories=previous_memories,
+        )
+
+    print(f"\n✅ [KAPSYEN AI REELS FINAL]:\n{caption_text}\n")
+
     fb_success = False
     ig_success = False
     threads_success = False
 
     try:
         # 9. Terbitkan ke Facebook Reels
-        print("\n🚀 [STEP 6] Memuat naik ke Facebook Reels...")
+        print("🚀 [STEP 6] Memuat naik ke Facebook Reels...")
         fb_ok, res_fb = upload_reel_to_facebook(
             page_id=fb_page_id,
             page_token=fb_page_token,
@@ -186,7 +190,7 @@ def run_pexels_reel_video_job():
                         caption=caption_text,
                         image_url="",
                         permalink=ig_permalink,
-                        post_type=f"Pexels Video Reel ({query_keyword})",
+                        post_type=f"Pexels Reel ({query_keyword}) | Audio: {music_title}",
                     )
             else:
                 print(f"  ⚠️ [IG REEL FAILED] {res_ig.get('error')}")
@@ -212,7 +216,7 @@ def run_pexels_reel_video_job():
                         caption=caption_text,
                         image_url="",
                         permalink=th_permalink,
-                        post_type=f"Threads Pexels Video ({query_keyword})",
+                        post_type=f"Threads Video ({query_keyword}) | Audio: {music_title}",
                     )
             else:
                 print(f"  ⚠️ [THREADS VIDEO FAILED] {res_th.get('error')}")
@@ -232,7 +236,7 @@ def run_pexels_reel_video_job():
             primary_story_id = f"{video_ids[0]}_{query_keyword.replace(' ', '_')}"
             mark_reel_story_vector_posted(vector_url, vector_token, primary_story_id, caption_text)
 
-            print("\n🎉 [SUCCESS] Seluruh aliran Video (FB + IG + Threads) selesai dengan jayanya!\n")
+            print("\n🎉 [SUCCESS] Seluruh aliran Video (Render Dahulu ➔ Ayat AI ➔ Multi-Post) selesai dengan jayanya!\n")
         else:
             print("\n❌ [FAILED] Video tidak berjaya dimuat naik ke mana-mana platform.\n")
 
