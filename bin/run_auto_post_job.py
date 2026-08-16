@@ -24,7 +24,6 @@ from src.vector_db import is_similar_product_posted, mark_vector_posted
 from src.ai_persona import generate_caption
 from src.telegram_bot import send_photo_to_telegram
 from src.facebook_bot import send_to_facebook_page
-from src.facebook_reel_bot import send_to_facebook_reel
 from src.threads_bot import send_to_threads
 from src.threads_ai_persona import generate_threads_affiliate_caption
 from src.threads_token_manager import get_active_threads_token
@@ -81,7 +80,7 @@ def fetch_all_links_fallback():
 
 def run_auto_posting_job():
     print("\n" + "=" * 70)
-    print("🤖 [START] ENJIN PEMPOSAN AUTOMATIK SOCIAL MEDIA (TG, FB, REELS, THREADS & IG)")
+    print("🤖 [START] ENJIN PEMPOSAN AUTOMATIK FEED SOCIAL MEDIA (TG, FB FEED, THREADS & IG)")
     print("=" * 70)
 
     # Membaca semua tetapan secara dinamik dari persekitaran
@@ -198,7 +197,6 @@ def run_auto_posting_job():
 
     tg_success = False
     fb_success = False
-    reel_success = False
     threads_success = False
     ig_success = False
 
@@ -234,25 +232,9 @@ def run_auto_posting_job():
         else:
             print(f"  ❌ Gagal pos ke Facebook Page Feed: {res_fb}")
 
-    # 6. PROSES FACEBOOK REELS
-    if fb_page_id and fb_page_token:
-        print("\n🎬 [STEP 6] Pos ke Facebook Reels...")
-        sent_reel_ok, res_reel = send_to_facebook_reel(
-            page_id=fb_page_id,
-            page_token=fb_page_token,
-            caption=shared_caption,
-            image_url=img_url,
-            affiliate_link=aff_link,
-        )
-        if sent_reel_ok:
-            print(f"  ✅ Berjaya dipos ke Facebook Reels! (Video ID: {res_reel.get('video_id')})")
-            reel_success = True
-        else:
-            print(f"  ❌ Gagal pos ke Facebook Reels: {res_reel}")
-
-    # 7. PROSES THREADS
+    # 6. PROSES THREADS FEED
     if threads_user_id and threads_token:
-        print("\n🧵 [STEP 7] Pos ke Threads...")
+        print("\n🧵 [STEP 6] Pos ke Threads...")
         threads_custom_caption = generate_threads_affiliate_caption(
             base_url=base_url,
             model=model,
@@ -273,9 +255,9 @@ def run_auto_posting_job():
         else:
             print(f"  ❌ Gagal pos ke Threads: {res_threads}")
 
-    # 8. PROSES INSTAGRAM FEED + AUDIT NOTIFICATION KE TELEGRAM
+    # 7. PROSES INSTAGRAM FEED + AUDIT NOTIFICATION KE TELEGRAM
     if instagram_bot.is_configured():
-        print("\n📸 [STEP 8] Pos ke Instagram Feed (@braderdin360)...")
+        print("\n📸 [STEP 7] Pos ke Instagram Feed (@braderdin360)...")
         ig_caption = instagram_ai.generate_affiliate_caption(selected_product)
         res_ig = instagram_bot.post_photo(
             image_url=img_url,
@@ -303,9 +285,9 @@ def run_auto_posting_job():
         else:
             print(f"  ❌ Gagal pos ke Instagram: {res_ig.get('error')}")
 
-    # 9. REKOD STATUS KE PANGKALAN DATA JIKA SEKURANG-KURANGNYA 1 PLATFORM BERJAYA
-    if tg_success or fb_success or reel_success or threads_success or ig_success:
-        print("\n💾 [STEP 9] Merekodkan status pemposan ke pangkalan data...")
+    # 8. REKOD STATUS KE PANGKALAN DATA JIKA SEKURANG-KURANGNYA 1 PLATFORM BERJAYA
+    if tg_success or fb_success or threads_success or ig_success:
+        print("\n💾 [STEP 8] Merekodkan status pemposan ke pangkalan data...")
 
         if mark_product_posted(redis_url, redis_token, p_id, title):
             print("  ✅ Rekod direkodkan di Upstash Redis (TTL 15 Hari).")
@@ -316,9 +298,9 @@ def run_auto_posting_job():
         sb_ok, sb_msg = mark_link_as_used(p_id)
         print(f"  ✅ Supabase: {sb_msg}")
 
-        print("\n🎉 [SUCCESS] Seluruh aliran pemposan automatik selesai dengan jayanya!\n")
+        print("\n🎉 [SUCCESS] Seluruh aliran pemposan Feed automatik selesai dengan jayanya!\n")
     else:
-        print("\n❌ Pemposan tidak berjaya dilaksanakan di mana-mana platform.")
+        print("\n❌ Pemposan Feed tidak berjaya dilaksanakan di mana-mana platform.")
 
 
 if __name__ == "__main__":

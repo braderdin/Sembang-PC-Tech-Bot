@@ -1,14 +1,15 @@
-name: Auto Post Social Media Feed (Telegram, FB Feed, Threads & Instagram)
+name: Auto Post Affiliate Reels & Threads Video
 
 on:
-#  schedule:
-    # Trigger pada 5.10am, 7.10am, 9.10am, 11.10am, 1.10pm, 3.10pm, 5.10pm, 7.10pm, 9.10pm, 11.10pm (MYT)
-#    - cron: '10 1,3,5,7,9,11,13,15,21,23 * * *'
+  schedule:
+    # Berjalan 3 kali sehari pada waktu puncak Malaysia (MYT = UTC+8):
+    # 09:30 AM MYT (01:30 UTC) | 02:30 PM MYT (06:30 UTC) | 07:30 PM MYT (11:30 UTC)
+    - cron: '30 1,6,11 * * *'
   workflow_dispatch:
     # Pilihan larian manual dari tab Actions di GitHub
 
 jobs:
-  auto-post-job:
+  post-affiliate-reels-job:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,42 +22,57 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+      - name: Install System Dependencies (FFmpeg for Reels Rendering)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas openpyxl requests python-dotenv
+          pip install requests python-dotenv moviepy
 
-      - name: Run Auto Posting Engine
+      - name: Run Affiliate Reels Engine
         env:
+          # OpenRouter AI Persona
           OPENROUTER_BASE_URL: ${{ secrets.OPENROUTER_BASE_URL }}
           OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
+          # Supabase DB
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
+          # Upstash Redis & Vector DB
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
-
           UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
           UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
 
+          # Telegram Audit Notification
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
+          # Meta Facebook Page & Reels
           FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+          META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
 
-          # Kunci Rahsia Threads:
+          # Instagram Professional Account & Reels
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+
+          # Meta Threads API
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
 
-          # Kunci Rahsia Instagram:
-          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
-          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
-          INSTAGRAM_APP_ID: ${{ secrets.INSTAGRAM_APP_ID }}
-          INSTAGRAM_APP_SECRET: ${{ secrets.INSTAGRAM_APP_SECRET }}
+          # Backblaze B2 Storage (Signed Ingestion for Threads Video)
+          B2_ACC1_KEY_ID: ${{ secrets.B2_ACC1_KEY_ID }}
+          B2_ACC1_APPLICATION_KEY: ${{ secrets.B2_ACC1_APPLICATION_KEY }}
+          B2_ACC1_BUCKET_ID: ${{ secrets.B2_ACC1_BUCKET_ID }}
+          B2_ACC1_BUCKET_NAME: ${{ secrets.B2_ACC1_BUCKET_NAME }}
         run: |
-          python bin/run_auto_post_job.py
+          python bin/run_affiliate_reel_job.py
