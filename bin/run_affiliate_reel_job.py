@@ -6,7 +6,7 @@ Features:
 - Dedicated AI Personas tailored for Facebook Reels, Instagram Reels & Threads Video.
 - 100% Strict Zero-Emoji & Glitch-Proof Filters (Prevents UTF-8 / Mojibake corruption).
 - Rich text generation optimized for the specific character limits of each platform.
-- Local MoviePy 9:16 vertical MP4 stitching (1080x1920) with background music.
+- Local MoviePy MP4 stitching using original image size/ratio with background music.
 - Multi-platform publishing (FB Reels + Comment link, IG Reels, Threads via Backblaze B2).
 - Detailed Telegram audit report dispatch with all platform captions and status links.
 """
@@ -137,7 +137,7 @@ def is_image_valid(url: str) -> bool:
 
 
 # =============================================================================
-# 2. ENJIN MOVIEPY (IMAGE TO VERTICAL 9:16 MP4 + LOCAL META MUSIC)
+# 2. ENJIN MOVIEPY (IMAGE TO MP4 SAIS ASAL + LOCAL META MUSIC)
 # =============================================================================
 
 def get_random_local_music(music_dir: Path, target_duration: int = 8) -> Tuple[Optional[Any], str]:
@@ -171,8 +171,8 @@ def get_random_local_music(music_dir: Path, target_duration: int = 8) -> Tuple[O
 
 
 def build_product_reel_video(image_url: str, music_dir: Path, duration: int = 8) -> Tuple[Optional[str], str]:
-    """Memuat turun gambar produk dan menukarnya kepada video MP4 vertikal (1080x1920) berserta audio."""
-    print(f"\n🎬 [MOVIEPY] Membina video Reel vertikal daripada gambar produk...")
+    """Memuat turun gambar produk dan menukarnya kepada video MP4 berserta audio menggunakan saiz asal gambar."""
+    print(f"\n🎬 [MOVIEPY] Membina video Reel mengikut saiz asal gambar produk...")
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get(image_url, headers=headers, timeout=20)
@@ -194,11 +194,15 @@ def build_product_reel_video(image_url: str, music_dir: Path, duration: int = 8)
         else:
             clip = clip.set_duration(duration)
 
-        # Skalakan ke resolusi 1080x1920 (9:16)
-        if hasattr(clip, "resized"):
-            clip = clip.resized((1080, 1920))
-        elif hasattr(clip, "resize"):
-            clip = clip.resize((1080, 1920))
+        # Kekalkan saiz dan nisbah asal (pastikan dimensi genap untuk keserasian H.264 / ffmpeg)
+        w, h = clip.size
+        if w % 2 != 0 or h % 2 != 0:
+            even_w = w - (w % 2)
+            even_h = h - (h % 2)
+            if hasattr(clip, "resized"):
+                clip = clip.resized((even_w, even_h))
+            elif hasattr(clip, "resize"):
+                clip = clip.resize((even_w, even_h))
 
         # Pasangkan muzik latar
         bg_audio, music_title = get_random_local_music(music_dir, target_duration=duration)
@@ -490,7 +494,7 @@ def send_full_telegram_audit(
 
 def run_affiliate_reel_job():
     print("\n" + "=" * 70)
-    print("🎬 [START] ENJIN PEMPOSAN AFFILIATE REELS (FB + IG + THREADS 9:16)")
+    print("🎬 [START] ENJIN PEMPOSAN AFFILIATE REELS (FB + IG + THREADS)")
     print("=" * 70)
 
     # 1. Baca Konfigurasi Persekitaran (100% Dynamic Environment Driven)
@@ -577,7 +581,7 @@ def run_affiliate_reel_job():
     print(f"   Kategori: {category}")
     print(f"   Link    : {aff_link}")
 
-    # 4. Bina Video MP4 Vertikal 9:16 bersama Trek Muzik
+    # 4. Bina Video MP4 Mengikut Saiz Asal Gambar bersama Trek Muzik
     rendered_video_path, music_title = build_product_reel_video(
         image_url=img_url,
         music_dir=music_dir,

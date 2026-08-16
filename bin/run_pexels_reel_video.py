@@ -9,7 +9,7 @@ Optimized Execution Flow:
 4. [RENDER DAHULU] MoviePy stitches 3 clips (21-24s, 1080x1920) + local audio from assets/music/.
 5. [AI JANA AYAT SELEPAS RENDER] AI Persona generates caption with full video & music metadata.
 6. Vector DB checks caption semantic similarity (5-day window) with auto-retry loop.
-7. Publish to Facebook Reels (Meta Graph API).
+7. Publish to Facebook Reels (Meta Graph API) with Fallback to Facebook Feed if Reels Limit.
 8. Publish to Instagram Reels (@braderdin360) + Send Telegram Audit.
 9. Publish to Threads (@braderdin360 via Backblaze B2 Signed Storage) + Send Telegram Audit.
 10. Record Video IDs (Redis 30-Day TTL), Caption Memory & Vector Embeddings.
@@ -17,6 +17,7 @@ Optimized Execution Flow:
 
 import os
 import sys
+import requests
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -48,6 +49,32 @@ from src.pexels_vector_db import (
     is_similar_reel_story_posted,
     mark_reel_story_vector_posted,
 )
+
+
+def upload_video_to_facebook_feed(page_id: str, page_token: str, video_path: str, caption: str):
+    """Fallback memuat naik video terus ke Facebook Page Feed jika FB Reels terhad/gagal."""
+    if not page_id or not page_token or not os.path.exists(video_path):
+        return False, {"error": "Parameter tidak lengkap atau fail video tidak dijumpai"}
+
+    url = f"https://graph-video.facebook.com/v26.0/{page_id}/videos"
+    payload = {
+        "description": caption,
+        "access_token": page_token,
+    }
+
+    try:
+        with open(video_path, "rb") as video_file:
+            files = {"source": (os.path.basename(video_path), video_file, "video/mp4")}
+            res = requests.post(url, data=payload, files=files, timeout=60)
+
+        data = res.json()
+        if res.status_code in [200, 201] and "id" in data:
+            return True, {"id": data["id"]}
+        else:
+            err_msg = data.get("error", {}).get("message", res.text)
+            return False, {"error": err_msg}
+    except Exception as e:
+        return False, {"error": str(e)}
 
 
 def run_pexels_reel_video_job():
@@ -156,7 +183,7 @@ def run_pexels_reel_video_job():
     threads_success = False
 
     try:
-        # 9. Terbitkan ke Facebook Reels
+        # 9. Terbitkan ke Facebook Reels (Fallback ke Facebook Feed jika gagal/limit)
         print("🚀 [STEP 6] Memuat naik ke Facebook Reels...")
         fb_ok, res_fb = upload_reel_to_facebook(
             page_id=fb_page_id,
@@ -166,8 +193,21 @@ def run_pexels_reel_video_job():
         )
         if fb_ok:
             fb_success = True
+            print("  ✅ Berjaya dipos ke Facebook Reels!")
         else:
             print(f"  ⚠️ [FB REEL SKIP/FAILED] {res_fb.get('error')}")
+            print("  🔄 [FALLBACK] Mencuba muat naik video terus ke Facebook Page Feed...")
+            fb_feed_ok, res_feed = upload_video_to_facebook_feed(
+                page_id=fb_page_id,
+                page_token=fb_page_token,
+                video_path=rendered_video_path,
+                caption=caption_text,
+            )
+            if fb_feed_ok:
+                fb_success = True
+                print(f"  ✅ Berjaya dipos ke Facebook Feed! (ID: {res_feed.get('id')})")
+            else:
+                print(f"  ❌ [FB FEED FAILED] {res_feed.get('error')}")
 
         # 10. Terbitkan ke Instagram Reels (@braderdin360) + Audit Telegram
         if instagram_reel_bot.is_configured():
