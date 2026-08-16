@@ -6,8 +6,8 @@ Optimized Execution Flow:
 1. Detect Malaysian Time Slot & Load 5 Recent Memories from Redis.
 2. AI Generates 10 Candidates -> Filters via Redis 5-Day & Vector DB 5-Day Guardrails -> 1 Keyword Selected.
 3. 1 API Call to Pexels (per_page=20) -> Strict Faceless Filter -> Redis 30-Day Duplicate Filtering -> Pick 3 Clips.
-4. [RENDER DAHULU] MoviePy stitches 3 clips (21-24s, 1080x1920) + local audio from assets/music/.
-5. [AI JANA AYAT SELEPAS RENDER] AI Persona generates caption with full video & music metadata.
+4. [RENDER DAHULU] MoviePy stitches 3 clips (21-24s, 1080x1920) + local audio from assets/music/ (with Smart Metadata).
+5. [AI JANA AYAT SELEPAS RENDER] AI Persona generates caption with full video & music metadata (Title, Artist, Genre, Vibe).
 6. Vector DB checks caption semantic similarity (5-day window) with auto-retry loop.
 7. Publish to Facebook Reels (Meta Graph API) with Fallback to Facebook Feed if Reels Limit.
 8. Publish to Instagram Reels (@braderdin360) + Send Telegram Audit.
@@ -145,9 +145,9 @@ def run_pexels_reel_video_job():
 
     video_ids = [v["id"] for v in selected_videos]
 
-    # 6. [RENDER DAHULU] MoviePy Membina Video MP4 + Pilih Audio Latar
-    print("\n🎬 [STEP 4] [RENDER DAHULU] Membina video Reel MP4 berserta audio latar...")
-    rendered_video_path, music_title, video_duration = render_stitched_reel_video(
+    # 6. [RENDER DAHULU] MoviePy Membina Video MP4 + Pilih Audio Latar & Metadata
+    print("\n🎬 [STEP 4] [RENDER DAHULU] Membina video Reel MP4 berserta audio latar & metadata...")
+    rendered_video_path, music_info, video_duration = render_stitched_reel_video(
         video_items=selected_videos,
         music_dir=music_dir,
         single_clip_duration=8,
@@ -157,11 +157,15 @@ def run_pexels_reel_video_job():
         print("❌ [ABORT] Gagal menjana fail video akhir.")
         return
 
-    # 7. [AI JANA AYAT SELEPAS RENDER] AI Menjana Kapsyen Berdasarkan Video Siap
-    print(f"\n✍️ [STEP 5] [AI JANA AYAT] Menjana kapsyen micro-hook (Visual: '{query_keyword}', Muzik: '{music_title}', Durasi: {video_duration}s)...")
+    music_title_display = music_info.get("title", "Original Audio")
+    music_artist_display = music_info.get("artist", "")
+    music_audit_label = f"{music_title_display} ({music_artist_display})" if music_artist_display else music_title_display
+
+    # 7. [AI JANA AYAT SELEPAS RENDER] AI Menjana Kapsyen Berdasarkan Video Siap + Metadata Muzik Penuh
+    print(f"\n✍️ [STEP 5] [AI JANA AYAT] Menjana penceritaan Reels berjiwa (Visual: '{query_keyword}', Muzik: '{music_audit_label}', Durasi: {video_duration}s)...")
     caption_text = pexels_ai.generate_reel_caption(
         topic_keyword=query_keyword,
-        music_title=music_title,
+        music_info=music_info,
         video_duration=video_duration,
         previous_memories=previous_memories,
     )
@@ -171,12 +175,12 @@ def run_pexels_reel_video_job():
         print("⚠️ [PEXELS REEL VECTOR] Topik kapsyen serupa dikesan (< 5 hari lepas). Menjana alternatif...")
         caption_text = pexels_ai.generate_reel_caption(
             topic_keyword=query_keyword,
-            music_title=music_title,
+            music_info=music_info,
             video_duration=video_duration,
             previous_memories=previous_memories,
         )
 
-    print(f"\n✅ [KAPSYEN AI REELS FINAL]:\n{caption_text}\n")
+    print(f"\n✅ [KAPSYEN AI REELS FINAL ({len(caption_text)} aksara)]:\n{caption_text}\n")
 
     fb_success = False
     ig_success = False
@@ -230,7 +234,7 @@ def run_pexels_reel_video_job():
                         caption=caption_text,
                         image_url="",
                         permalink=ig_permalink,
-                        post_type=f"Pexels Reel ({query_keyword}) | Audio: {music_title}",
+                        post_type=f"Pexels Reel ({query_keyword}) | Audio: {music_audit_label}",
                     )
             else:
                 print(f"  ⚠️ [IG REEL FAILED] {res_ig.get('error')}")
@@ -256,7 +260,7 @@ def run_pexels_reel_video_job():
                         caption=caption_text,
                         image_url="",
                         permalink=th_permalink,
-                        post_type=f"Threads Video ({query_keyword}) | Audio: {music_title}",
+                        post_type=f"Threads Video ({query_keyword}) | Audio: {music_audit_label}",
                     )
             else:
                 print(f"  ⚠️ [THREADS VIDEO FAILED] {res_th.get('error')}")

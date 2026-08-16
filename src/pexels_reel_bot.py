@@ -6,7 +6,7 @@ Features:
 - 1-API Call Pexels Batch Fetch (20 Videos) & Redis 30-Day Duplicate Filtering
 - Comprehensive Facial & Sensitive Filter (Rejects all human faces, gamers, streamers, selfies)
 - High-Performance MoviePy 9:16 Stitching (1080x1920, H.264/AAC, 21-24 Saat)
-- Local Background Music Ingestion with Clean Title Extraction
+- Smart Audio Metadata & ID3 Ingestion (Extracts Clean Title, Artist, Genre & Vibe)
 - Meta Graph API Video Reels Publisher with Comprehensive Diagnostics
 """
 
@@ -17,6 +17,14 @@ import tempfile
 import requests
 from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
+
+# Mutagen ID3 Metadata Reader
+try:
+    from mutagen import File as MutagenFile
+    from mutagen.easyid3 import EasyID3
+except ImportError:
+    MutagenFile = None
+    EasyID3 = None
 
 # MoviePy v1.x & v2.x Compatibility Layer
 try:
@@ -164,21 +172,96 @@ def download_video_clip(url: str, filename_prefix: str = "clip") -> str:
     return ""
 
 
-def get_local_music_clip(music_dir: Path, target_duration: int = 24) -> Tuple[Optional[Any], str]:
-    """Mengambil audio rawak daripada folder assets/music/ dan memulangkan clip berserta tajuk trek bersih."""
+def detect_audio_vibe(title: str, genre: str, artist: str) -> str:
+    """Mengenal pasti emosi/vibe muzik secara automatik untuk disalurkan ke AI Persona."""
+    text = f"{title} {genre} {artist}".lower()
+    
+    if any(k in text for k in ["acoustic", "guitar", "evening", "peace", "calm", "relax", "serene", "nature"]):
+        return "Akustik Santai, Damai & Menenangkan Fikiran"
+    elif any(k in text for k in ["lofi", "lo-fi", "chill", "coffee", "night", "study", "cozy", "rain"]):
+        return "Lo-Fi Chill, Santai & Terapi Ruang Kerja"
+    elif any(k in text for k in ["cyberpunk", "synthwave", "retrowave", "neon", "future", "matrix", "dark"]):
+        return "Synthwave Futuristik & Battlestation Ambient"
+    elif any(k in text for k in ["piano", "classical", "melodic", "soft", "ambient", "dream"]):
+        return "Melodi Piano Lembut & Fokus Reflektif"
+    elif any(k in text for k in ["rock", "electronic", "upbeat", "energetic", "beat", "drum"]):
+        return "Rentak Bertenaga & Mood Produktiviti Tinggi"
+    
+    return "Muzik Latar Estetik & Santai"
+
+
+def extract_smart_audio_metadata(song_path: str, filename: str) -> Dict[str, str]:
+    """Mengekstrak metadata audio dengan menapis ID berangka Meta dan membersihkan nama fail."""
+    base_name = os.path.splitext(filename)[0]
+    
+    # 1. Bersihkan nama fail menjadi tajuk lagu yang kemas
+    clean_title_from_file = re.sub(r'[_\-]+', ' ', base_name).strip()
+    # Buang perkataan sampingan seperti '30s', 'Loop', 'Instrumental' untuk teks yang lebih kemas
+    clean_title_from_file = re.sub(r'\b(30s|loop|instrumental|reels sound|before after)\b', '', clean_title_from_file, flags=re.I)
+    clean_title_from_file = re.sub(r'\s+', ' ', clean_title_from_file).strip().title()
+
+    title = ""
+    artist = ""
+    genre = ""
+
+    # 2. Cuba baca tag ID3 (jika ada)
+    if MutagenFile:
+        try:
+            audio_tag = MutagenFile(song_path)
+            if audio_tag and hasattr(audio_tag, "get"):
+                raw_nam = str(audio_tag.get("\xa9nam", [""])[0] if isinstance(audio_tag.get("\xa9nam"), list) else audio_tag.get("\xa9nam", ""))
+                # Jika tag title bukan sekadar nombor ID Meta, gunakannya
+                if raw_nam and not raw_nam.strip().isdigit():
+                    title = raw_nam.strip()
+
+                raw_art = str(audio_tag.get("\xa9ART", [""])[0] if isinstance(audio_tag.get("\xa9ART"), list) else audio_tag.get("\xa9ART", ""))
+                if raw_art and not raw_art.strip().isdigit():
+                    artist = raw_art.strip()
+        except Exception:
+            pass
+
+    # 3. Gunakan tajuk dari nama fail jika tag kosong atau mengandungi nombor ID sahaja
+    if not title or title.isdigit():
+        title = clean_title_from_file or "Original Audio"
+
+    if not artist:
+        artist = "Artis Komposer Pilihan"
+
+    vibe = detect_audio_vibe(title, genre, artist)
+
+    return {
+        "title": title,
+        "artist": artist,
+        "genre": genre or "Acoustic / Chill Ambient",
+        "vibe": vibe,
+        "filename": filename
+    }
+
+
+def get_local_music_clip(music_dir: Path, target_duration: int = 24) -> Tuple[Optional[Any], Dict[str, str]]:
+    """Mengambil audio rawak daripada folder assets/music/ dan memulangkan klip audio serta metadata lengkap."""
+    default_meta = {
+        "title": "Original Audio",
+        "artist": "Sembang PC & Tech",
+        "genre": "Aesthetic Ambient",
+        "vibe": "Santai & Tenang",
+        "filename": "Original Audio"
+    }
+
     if not music_dir.exists():
         music_dir.mkdir(parents=True, exist_ok=True)
-        return None, "Original Audio"
+        return None, default_meta
 
     audio_files = [f for f in os.listdir(music_dir) if f.lower().endswith((".mp3", ".wav", ".m4a", ".mp4"))]
     if not audio_files:
         print("  ⚠️ Tiada fail audio di assets/music/. Video dijana tanpa lagu latar.")
-        return None, "Original Audio"
+        return None, default_meta
 
     selected_file = random.choice(audio_files)
-    clean_title = re.sub(r'[_\-]+', ' ', os.path.splitext(selected_file)[0]).strip().title()
     song_path = str(music_dir / selected_file)
-    print(f"  🎵 [AUDIO] Menggunakan lagu latar: '{selected_file}' (Tajuk: {clean_title})")
+    meta = extract_smart_audio_metadata(song_path, selected_file)
+    
+    print(f"  🎵 [AUDIO METADATA] Trek: '{meta['title']}' | Artis: '{meta['artist']}' | Genre: '{meta['genre']}' | Vibe: '{meta['vibe']}'")
 
     try:
         audio = AudioFileClip(song_path)
@@ -190,26 +273,32 @@ def get_local_music_clip(music_dir: Path, target_duration: int = 24) -> Tuple[Op
         else:
             cut_audio = audio.subclip(start, end)
 
-        return cut_audio, clean_title
+        return cut_audio, meta
     except Exception as e:
         print(f"  ⚠️ Ralat memproses audio latar: {e}")
-        return None, "Original Audio"
+        return None, default_meta
 
 
 def render_stitched_reel_video(
     video_items: List[Dict[str, Any]],
     music_dir: Path,
     single_clip_duration: int = 8,
-) -> Tuple[Optional[str], str, int]:
+) -> Tuple[Optional[str], Dict[str, str], int]:
     """
     Mencantumkan 3 klip video menjadi 1 video Reel vertikal (1080x1920, 21–24 saat)
     berserta trek audio AAC berkualiti tinggi.
-    Memulangkan: (output_video_path, music_title, total_duration)
+    Memulangkan: (output_video_path, music_info_dict, total_duration)
     """
     print(f"\n🎬 [MOVIEPY] Memulakan proses cantuman {len(video_items)} klip video...")
     downloaded_paths = []
     loaded_clips = []
-    selected_music_title = "Original Audio"
+    selected_music_info = {
+        "title": "Original Audio",
+        "artist": "Sembang PC & Tech",
+        "genre": "Aesthetic Ambient",
+        "vibe": "Santai & Tenang",
+        "filename": "Original Audio"
+    }
     total_duration = 24
 
     try:
@@ -242,7 +331,7 @@ def render_stitched_reel_video(
 
         if not loaded_clips:
             print("❌ Tiada klip video yang berjaya dimuatkan.")
-            return None, selected_music_title, 0
+            return None, selected_music_info, 0
 
         # Cantumkan klip-klip
         final_video = concatenate_videoclips(loaded_clips, method="compose")
@@ -250,7 +339,7 @@ def render_stitched_reel_video(
         print(f"  ⏱️ Jumlah durasi Reel: {total_duration} saat.")
 
         # Pasangkan muzik latar
-        bg_audio, selected_music_title = get_local_music_clip(music_dir, target_duration=total_duration)
+        bg_audio, selected_music_info = get_local_music_clip(music_dir, target_duration=total_duration)
         if bg_audio:
             if hasattr(final_video, "with_audio"):
                 final_video = final_video.with_audio(bg_audio)
@@ -279,7 +368,7 @@ def render_stitched_reel_video(
         if bg_audio:
             bg_audio.close()
 
-        return output_path, selected_music_title, total_duration
+        return output_path, selected_music_info, total_duration
 
     finally:
         for dp in downloaded_paths:

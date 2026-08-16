@@ -3,11 +3,11 @@
 AI Persona Engine for Facebook Pexels Video Reels (Brader Din Style)
 Sembang PC & Tech Ecosystem (100% Dynamic OpenRouter & Glitch-Proof)
 Features:
-- Micro-Hook & High-Engagement Question Generator for Short Video Reels
+- Micro-Hook & Storytelling Caption Generator for Video Reels & Threads (Target 320-430 Chars)
 - Dynamic Malaysian Time-Slot & Mood Awareness (MYT = UTC+8)
-- Background Music Integration (AI weaves the track title naturally into the caption)
+- Full Audio & Metadata Ingestion (Artist, Title, Genre & Vibe integration)
 - Anti-Glitch & Strict Malay Language Anchor Guardrails
-- 2-Attempt Auto-Retry Loop with Clean Fallback
+- 2-Attempt Auto-Retry Loop with Resilient Persona Fallback
 """
 
 import os
@@ -15,7 +15,7 @@ import re
 import requests
 from collections import Counter
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any, Union
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,7 +25,8 @@ MALAY_ANCHOR_WORDS = {
     "yang", "dan", "di", "ke", "kat", "ni", "tu", "dah", "nak", "ada",
     "kita", "korang", "saya", "buat", "bila", "dengan", "pun", "rasa",
     "meja", "setup", "pc", "kerja", "santai", "tengok", "dalam", "untuk",
-    "tak", "bukan", "memang", "lagi", "hujung", "minggu", "malam", "pagi", "petang"
+    "tak", "bukan", "memang", "lagi", "hujung", "minggu", "malam", "pagi", "petang",
+    "ruang", "fokus", "lampu", "suasana", "layan", "muzik", "lagu"
 }
 
 
@@ -52,8 +53,8 @@ def clean_glitches_and_meta_chatter(text: str) -> str:
 
 
 def is_valid_reel_caption(text: str) -> bool:
-    """Menyemak kualiti teks bagi memastikan kapsyen Reel ringkas dan semula jadi."""
-    if not text or len(text.strip()) < 50:
+    """Menyemak kualiti teks bagi memastikan kapsyen Reel berjiwa, kemas dan menepati piawaian."""
+    if not text or len(text.strip()) < 80:
         return False
     if "<pad>" in text.lower() or "<unk>" in text.lower():
         return False
@@ -63,7 +64,7 @@ def is_valid_reel_caption(text: str) -> bool:
 
     words = [w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', text)]
     total_words = len(words)
-    if total_words < 10:
+    if total_words < 15:
         return False
 
     unique_words = set(words)
@@ -109,7 +110,7 @@ def detect_reel_time_slot() -> Tuple[str, str, str, float]:
 
 
 class PexelsAIPersona:
-    """Enjin AI Persona khusus untuk Facebook Pexels Video Reels."""
+    """Enjin AI Persona khusus untuk Facebook Pexels Video Reels, Instagram Reels & Threads."""
 
     def __init__(self):
         self.base_url = (os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").strip().rstrip("/")
@@ -134,7 +135,7 @@ class PexelsAIPersona:
                 {"role": "user", "content": user_prompt.strip()},
             ],
             "temperature": temperature,
-            "max_tokens": 400,
+            "max_tokens": 450,
             "frequency_penalty": 0.0,
             "presence_penalty": 0.0,
         }
@@ -158,18 +159,47 @@ class PexelsAIPersona:
     def generate_reel_caption(
         self,
         topic_keyword: str,
-        music_title: Optional[str] = None,
+        music_info: Optional[Union[Dict[str, Any], str]] = None,
         video_duration: Optional[int] = None,
         previous_memories: Optional[List[str]] = None,
         slot_override: Optional[str] = None,
     ) -> str:
         """
-        Menjana kapsyen pendek (*micro-hook*) selepas video siap dirender.
-        AI Persona menyuntik tajuk lagu latar ke dalam ayat untuk menghidupkan suasana.
+        Menjana kapsyen penceritaan hidup (320–430 aksara) selepas video siap dirender.
+        AI Persona menyuntik metadata lagu (Tajuk, Artis, Genre, Vibe) secara mendalam.
         """
         slot_id, slot_desc, day_mood, temp = detect_reel_time_slot()
         if slot_override:
             slot_id = slot_override
+
+        # Ekstrak Metadata Muzik
+        if isinstance(music_info, dict):
+            song_title = music_info.get("title", "Original Audio")
+            song_artist = music_info.get("artist", "")
+            song_genre = music_info.get("genre", "")
+            song_vibe = music_info.get("vibe", "Santai & Tenang")
+        elif isinstance(music_info, str):
+            song_title = music_info
+            song_artist = ""
+            song_genre = ""
+            song_vibe = "Santai & Tenang"
+        else:
+            song_title = "Original Audio"
+            song_artist = ""
+            song_genre = ""
+            song_vibe = "Santai & Tenang"
+
+        has_custom_music = song_title and song_title not in ["Original Audio", ""]
+
+        if has_custom_music:
+            artist_part = f" oleh artis {song_artist}" if song_artist and song_artist not in ["Sembang PC & Tech", "Artis Komposer Pilihan"] else ""
+            genre_part = f" (Genre: {song_genre}, Suasana: {song_vibe})" if song_genre else ""
+            music_guidance = (
+                f"Video ini diiringi lagu latar '{song_title}'{artist_part}{genre_part}. "
+                f"Selitkan elemen melodi/vibe muzik ini (contoh: petikan gitar akustik / rentak lo-fi yang menenangkan) bersama visual meja kerja supaya penceritaan lebih hidup & menyentuh emosi penonton."
+            )
+        else:
+            music_guidance = "Fokus kepada keindahan visual setup, ketenangan ruang kerja, dan aura produktiviti."
 
         memory_context = ""
         if previous_memories and len(previous_memories) > 0:
@@ -178,14 +208,6 @@ class PexelsAIPersona:
 INGATAN REELS LEPAS (JANGAN ULANG SOALAN ATAU AYAT SAMA):
 {formatted_memories}
 """
-
-        has_custom_music = music_title and music_title not in ["Original Audio", ""]
-        music_guidance = (
-            f"Video ini diiringi lagu latar bertajuk '{music_title}'. "
-            f"Suntik tajuk lagu ini secara santai dalam pembuka ayat (contoh: 'Layan visual ni sambil layan trek {music_title}...')."
-            if has_custom_music
-            else "Fokus pada visual estetik dan suasana tenang ruang kerja."
-        )
 
         dur_info = f"\nDURASI VIDEO: {video_duration} saat" if video_duration else ""
 
@@ -198,27 +220,31 @@ Video Reels pendek 9:16 telah siap dibina dengan spesifikasi:
 WAKTU HANTARAN (MALAYSIA): {slot_desc}
 MOOD HARI INI: {day_mood}
 {memory_context}
-PANDUAN PENULISAN REELS (SANGAT KETAT):
-1. Panjang Kapsyen: WAJIB PENDEK (Maksimum 250 aksara) kerana penonton perlukan teks pantas dibaca.
-2. Fasa 1 (Hook Pantas): 1 atau 2 ayat santai tentang visual teknologi ini berserta sebutan santai trek lagu latar.
-3. Fasa 2 (Call to Engagement): 1 soalan santai & menarik untuk mengajak penonton berbalas komen (contoh: bandingkan cita rasa setup, switch keyboard, atau cara kerja).
-4. Fasa 3 (Hashtags): Akhiri dengan 4 hingga 6 hashtag relevan (#SembangPCTech #TechMalaysia #ReelsMalaysia #PCSetup #Workspace).
-5. DILARANG meletakkan link pautan belian.
-6. DILARANG sebarang mukadimah AI (TERUS TULIS AYAT KANDUNGAN).
+PANDUAN PENULISAN REELS & THREADS (SANGAT KETAT & HIDUP):
+1. Panjang Kapsyen: WAJIB DI ANTARA 320 HINGGA 430 AKSARA (Zon Emas: Cukup panjang untuk bercerita dengan jiwa, tetapi tidak melebihi had 480 aksara Threads).
+2. Lapisan 1 (Hook Suasana & Muzik): Buka dengan 1-2 ayat santai yang menggabungkan visual setup dengan trek muzik/artis/genre lagu latar.
+3. Lapisan 2 (Refleksi / POV Setup): Ceritakan sedikit tentang nikmat fokus kerja, susun atur meja, lampu ambient, atau kepuasan ruang kerja peribadi.
+4. Lapisan 3 (Call to Engagement): 1 soalan santai & bermakna untuk mengajak komuniti berbalas komen (cth: citarasa setup, cara mereka fokus buat kerja, atau pilihan muzik waktu bekerja).
+5. Lapisan 4 (Hashtags): Akhiri dengan 4 hingga 5 hashtag kemas (#SembangPCTech #WorkspaceAesthetic #TechMalaysia #PCSetup #ReelsMalaysia).
+6. DILARANG meletakkan sebarang link pautan belian.
+7. DILARANG sebarang mukadimah AI atau meta-text (TERUS TULIS AYAT KANDUNGAN).
 """
 
         user_prompt = f"""
-Hasilkan kapsyen Reel bertemakan visual '{topic_keyword}'.
-Tuliskan teks kapsyen lengkap sekarang:
+Hasilkan teks penceritaan Reel lengkap sekarang bertemakan visual '{topic_keyword}'.
+Pastikan panjang teks antara 320 hingga 430 aksara dengan gaya Brader Din yang berjiwa:
 """
 
         caption = self._call_openrouter(system_prompt, user_prompt, temperature=temp)
         if not caption:
-            music_mention = f" sambil layan trek '{music_title}'" if has_custom_music else ""
+            # Fallback berjiwa berkualiti tinggi
+            artist_str = f" {song_artist}" if song_artist and song_artist not in ["Sembang PC & Tech", "Artis Komposer Pilihan"] else ""
+            music_mention = f" sambil melayan alunan trek '{song_title}'{artist_str}" if has_custom_music else ""
             caption = (
-                f"Bila susun atur meja kemas dan visual setup sedap mata memandang{music_mention}, semangat nak fokus terus naik level. ✨🖥️\n\n"
-                f"Korang jenis suka setup minimalis ringkas atau penuh dengan lampu ambient? Cuba kongsikan sikit di ruang komen! 👇\n\n"
-                f"#SembangPCTech #TechMalaysia #ReelsMalaysia #PCSetup #WorkspaceInspiration"
+                f"Bila lampu meja ambient dipasang dan ruang kerja tersusun kemas{music_mention}, "
+                f"suasana terus bertukar jadi terapi paling tenang lepas seharian mengadap skrin. ☕✨\n\n"
+                f"Korang jenis yang perlukan suasana senyap sunyi untuk fokus, atau wajib ada lagu latar santai macam ni baru idea jalan lancar? Cer kongsikan sikit di komen! 👇🖥️\n\n"
+                f"#SembangPCTech #WorkspaceAesthetic #TechMalaysia #PCSetup #ReelsMalaysia"
             )
 
         return caption
