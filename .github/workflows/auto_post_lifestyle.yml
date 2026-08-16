@@ -2,8 +2,8 @@ name: Auto Post Lifestyle Story & Reels (AI Tech Specialist)
 
 on:
 #  schedule:
-    # Trigger pada 7.40am, 11.40am, 5.40ptg, 11.40MALAM (MYT)
-#    - cron: '40 3,9,15,23 * * *'
+    # Trigger pada 06.10am, 04.10pm, 10.10pm (MYT)
+#    - cron: '10 8,14,22 * * *'
   workflow_dispatch:
     # Pilihan larian manual dari tab Actions di GitHub
 

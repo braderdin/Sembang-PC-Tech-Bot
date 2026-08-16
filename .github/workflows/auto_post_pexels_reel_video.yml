@@ -2,8 +2,8 @@ name: Auto Post Pexels 9:16 Video Reels (FB, IG & Threads)
 
 on:
   schedule:
-    # Trigger 2 kali sehari pada 12:30 PM & 8:30 PM waktu Malaysia (MYT / UTC+8)
-    - cron: '30 4,12 * * *'
+    # Trigger 2 kali sehari pada 08:10 AM & 2:10 PM waktu Malaysia (MYT / UTC+8)
+    - cron: '10 0,6 * * *'
   workflow_dispatch:
     # Pilihan larian manual bila-bila masa dari tab Actions di GitHub
 

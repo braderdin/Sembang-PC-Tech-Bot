@@ -2,9 +2,9 @@ name: Auto Post Affiliate Reels & Threads Video
 
 on:
   schedule:
-    # Berjalan 3 kali sehari pada waktu puncak Malaysia (MYT = UTC+8):
-    # 09:30 AM MYT (01:30 UTC) | 02:30 PM MYT (06:30 UTC) | 07:30 PM MYT (11:30 UTC)
-    - cron: '30 1,6,11 * * *'
+    # Berjalan 2 kali sehari pada waktu puncak Malaysia (MYT = UTC+8):
+    # 06:10 PM MYT (10:10 UTC) | 08:10 PM MYT (12:10 UTC)
+    - cron: '10 10,12 * * *'
   workflow_dispatch:
     # Pilihan larian manual dari tab Actions di GitHub
 
