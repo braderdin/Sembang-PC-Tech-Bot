@@ -560,7 +560,7 @@ def run_affiliate_reel_job():
 
     # 2. Ambil Calon Produk dari Supabase
     print("\n📦 [STEP 1] Membaca calon produk affiliate dari Supabase DB...")
-    ok, candidate_list, err_msg = fetch_unused_links(limit=50)
+    ok, candidate_list, err_msg = fetch_unused_links(limit=500)
 
     if not ok or not candidate_list:
         print("❌ [ABORT] Tiada produk berstatus status_used=false dijumpai di Supabase.")

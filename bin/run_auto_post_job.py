@@ -108,7 +108,7 @@ def run_auto_posting_job():
     threads_token = get_active_threads_token(redis_url, redis_token, raw_threads_token)
 
     print("\n📦 [STEP 1] Membaca pautan dari Supabase Cloud...")
-    ok, candidate_list, err_msg = fetch_unused_links(limit=100)
+    ok, candidate_list, err_msg = fetch_unused_links(limit=500)
 
     if not ok or not candidate_list:
         print("⚠️ Tiada pautan status_used=false. Membaca senarai pautan keseluruhan dari Supabase...")
