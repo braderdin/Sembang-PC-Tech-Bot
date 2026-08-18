@@ -22,7 +22,7 @@ jobs:
       - name: 📦 Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests python-dotenv
+          pip install -r requirements.txt
 
       - name: 🔄 Run Refresh Threads Token Job
         env:
