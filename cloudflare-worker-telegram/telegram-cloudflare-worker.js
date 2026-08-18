@@ -1,13 +1,14 @@
 /**
- * 🛍️ LUBUK BARANG MURAH PADU - 24/7 INTERACTIVE TELEGRAM CATALOG BOT
+ * 🛍️ LUBUK BARANG MURAH PADU - 24/7 INTERACTIVE TELEGRAM CATALOG BOT (DUAL-PLATFORM ENGINE)
  * Platform: Cloudflare Workers (Edge Serverless)
- * Backend: Supabase PostgreSQL REST API
+ * Backend: Supabase PostgreSQL REST API (Lazada: affiliate_links | Shopee: shopee_affiliate_links)
  * UI/UX:
- * 1. Rich Text Message Catalog (Full Product Title & Price displayed clearly)
- * 2. 5x2 Number Button Grid (1️⃣ - 🔟) - 100% Responsive on Mobile & Desktop
- * 3. Deep Brand & E-Commerce Tag Sanitizer (Removes redundant names & seller brackets)
- * 4. Smart Stateless Pagination with Exact Supabase Record Count
- * 5. One-Click Viral Share & Category Exploration Shortcuts
+ * 1. Dual-Table Hybrid Search (Merges & displays Shopee + Lazada products seamlessly)
+ * 2. Platform Badges [🟠 Shopee | 🔵 Lazada] in list view for crystal-clear clarity
+ * 3. 5x2 Number Button Grid (1️⃣ - 🔟) - 100% Responsive on Mobile & Desktop
+ * 4. Deep Brand & E-Commerce Tag Sanitizer (Removes redundant names & seller brackets)
+ * 5. Smart Stateless Pagination with Combined Exact Record Count
+ * 6. One-Click Viral Share & Category Exploration Shortcuts
  */
 
 export default {
@@ -38,7 +39,7 @@ export default {
       }
     }
 
-    return new Response("🤖 Lubuk Barang Murah Padu Engine is Running 24/7 on Cloudflare Workers!", {
+    return new Response("🤖 Lubuk Barang Murah Padu (Shopee + Lazada) Engine is Running 24/7 on Cloudflare Workers!", {
       headers: { "Content-Type": "text/plain; charset=utf-8" }
     });
   }
@@ -52,6 +53,39 @@ function getKeys(env) {
     tgToken: env.TELEGRAM_CATALOG_BOT_TOKEN || env.TELEGRAM_BOT_TOKEN || "",
     supabaseUrl: (env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, ""),
     supabaseKey: env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY || env.SUPABASE_ANON_KEY || ""
+  };
+}
+
+/**
+ * Normalizer: Menyeragamkan Objek Lazada & Shopee kepada 1 Format Standard
+ */
+function normalizeProduct(rawItem, platformHint = "Lazada") {
+  if (!rawItem) return null;
+
+  // Jika produk dari jadual Shopee
+  if (rawItem.shopee_product_id) {
+    return {
+      product_id: String(rawItem.shopee_product_id).trim(),
+      title: rawItem.shopee_product_name || "Produk Shopee",
+      price: parseFloat(rawItem.shopee_price) || 0.0,
+      category: rawItem.shopee_category || "📦 Tawaran Gajet & Gaya Hidup",
+      image_url: rawItem.shopee_picture_url || "",
+      affiliate_link: rawItem.shopee_affiliate_link || "",
+      brand: rawItem.shopee_brand || "Shopee Official",
+      platform: "Shopee"
+    };
+  }
+
+  // Jika produk dari jadual Lazada
+  return {
+    product_id: String(rawItem.product_id || rawItem.id || "").trim(),
+    title: rawItem.title || rawItem.product_name || "Produk Lazada",
+    price: parseFloat(rawItem.price || rawItem.discounted_price || rawItem.sale_price) || 0.0,
+    category: rawItem.category || "📦 Tawaran Gajet & Gaya Hidup",
+    image_url: rawItem.image_url || rawItem.picture_url || "",
+    affiliate_link: rawItem.affiliate_link || rawItem.promo_short_link || "",
+    brand: rawItem.brand || "Lazada",
+    platform: "Lazada"
   };
 }
 
@@ -123,11 +157,11 @@ async function sendWelcomeAndMenu(chatId, name, env) {
   const caption = 
     `👋 <b>Hai, ${escapeHtml(name)}!</b>\n` +
     `Selamat Datang ke <b>Lubuk Barang Murah Padu</b> 🔥🛍️\n\n` +
-    `Cari pautan rasmi & tawaran diskaun menarik untuk pelbagai kategori barangan:\n` +
+    `Cari pautan rasmi & tawaran diskaun menarik (Shopee & Lazada):\n` +
     `💻 Komputer, Setup & Gajet\n` +
     `🪑 Kerusi Ergonomik & Gaming\n` +
     `🍳 Peralatan Dapur & Rumah\n` +
-    `🎣 Hobi & Outdoor\n\n` +
+    `🎣 Hobi & Outdoor / Memancing\n\n` +
     `👇 <b>Sila pilih menu di bawah atau terus taip carian apa-apa barang:</b>`;
 
   const keyboard = {
@@ -152,7 +186,7 @@ async function sendWelcomeAndMenu(chatId, name, env) {
 }
 
 async function sendMainMenu(chatId, env, messageId = null) {
-  const text = `🛍️ <b>Menu Utama Lubuk Barang Murah Padu:</b>\n\nPilih mana-mana butang di bawah untuk mula meneroka:`;
+  const text = `🛍️ <b>Menu Utama Lubuk Barang Murah Padu (Shopee + Lazada):</b>\n\nPilih mana-mana butang di bawah untuk mula meneroka:`;
   const keyboard = {
     inline_keyboard: [
       [
@@ -197,8 +231,8 @@ async function sendCategoriesMenu(chatId, env, messageId = null) {
 async function sendHelpMessage(chatId, env, messageId = null) {
   const text = 
     `ℹ️ <b>Panduan Carian Pantas Lubuk Barang Murah:</b>\n\n` +
-    `1️⃣ <b>Taip Terus:</b> Anda boleh menaip apa-apa nama barang (contoh: <code>kerusi</code>, <code>laptop</code>, <code>keyboard</code>, <code>ssd</code>).\n` +
-    `2️⃣ <b>Senarai Pantas:</b> Bot akan mengeluarkan senarai padat 10 barangan lengkap dengan harga dan spesifikasi.\n` +
+    `1️⃣ <b>Taip Terus:</b> Anda boleh menaip apa-apa nama barang (contoh: <code>kerusi</code>, <code>laptop</code>, <code>keyboard</code>, <code>ugreen</code>, <code>vention</code>).\n` +
+    `2️⃣ <b>Senarai Pantas:</b> Bot akan menyaring pangkalan data <b>Shopee & Lazada</b> serentak.\n` +
     `3️⃣ <b>Pilih Nombor:</b> Tekan butang nombor (1️⃣ - 🔟) di bawah senarai untuk melihat gambar HD & pautan pembelian rasmi.\n\n` +
     `Selamat meneroka! ⚡`;
 
@@ -210,7 +244,7 @@ async function sendHelpMessage(chatId, env, messageId = null) {
 }
 
 /* =============================================================================
- * ⚡ ENJIN SENARAI PRODUK (TEXT CATALOG + 5x2 QUICK NUMBER GRID)
+ * ⚡ ENJIN SENARAI PRODUK DWI-JADUAL (SHOPEE + LAZADA HYBRID QUERY)
  * ============================================================================= */
 
 async function fetchAndShowProductList(chatId, env, mode, param = "", page = 1, messageId = null) {
@@ -218,7 +252,8 @@ async function fetchAndShowProductList(chatId, env, mode, param = "", page = 1, 
   const pageSize = 10;
   const offset = (page - 1) * pageSize;
 
-  let endpoint = "";
+  let lazadaEndpoint = "";
+  let shopeeEndpoint = "";
   let headerTitle = "";
 
   const categoryMap = {
@@ -230,6 +265,8 @@ async function fetchAndShowProductList(chatId, env, mode, param = "", page = 1, 
     outdoor: "🎣 Hobi & Outdoor / Memancing"
   };
 
+  const halfOffset = Math.floor(offset / 2);
+
   if (mode === "search") {
     if (!param || param.length < 2) {
       await callTelegram(env, "sendMessage", {
@@ -240,21 +277,42 @@ async function fetchAndShowProductList(chatId, env, mode, param = "", page = 1, 
       return;
     }
     headerTitle = `🔍 <b>Hasil Carian:</b> "${escapeHtml(param)}"`;
-    endpoint = `${supabaseUrl}/rest/v1/affiliate_links?title=ilike.*${encodeURIComponent(param)}*&order=id.desc&limit=${pageSize}&offset=${offset}`;
+    lazadaEndpoint = `${supabaseUrl}/rest/v1/affiliate_links?title=ilike.*${encodeURIComponent(param)}*&order=id.desc&limit=${pageSize}&offset=${halfOffset}`;
+    shopeeEndpoint = `${supabaseUrl}/rest/v1/shopee_affiliate_links?shopee_product_name=ilike.*${encodeURIComponent(param)}*&order=id.desc&limit=${pageSize}&offset=${halfOffset}`;
   } else if (mode === "category") {
     const targetCat = categoryMap[param] || "🪑 Kerusi Gaming & Ergonomik";
     headerTitle = `📂 <b>Kategori:</b> ${escapeHtml(targetCat)}`;
-    endpoint = `${supabaseUrl}/rest/v1/affiliate_links?category=eq.${encodeURIComponent(targetCat)}&order=id.desc&limit=${pageSize}&offset=${offset}`;
+    lazadaEndpoint = `${supabaseUrl}/rest/v1/affiliate_links?category=eq.${encodeURIComponent(targetCat)}&order=id.desc&limit=${pageSize}&offset=${halfOffset}`;
+    shopeeEndpoint = `${supabaseUrl}/rest/v1/shopee_affiliate_links?shopee_category=eq.${encodeURIComponent(targetCat)}&order=id.desc&limit=${pageSize}&offset=${halfOffset}`;
   } else if (mode === "hot") {
     headerTitle = `🔥 <b>Tawaran Hangat Terkini:</b>`;
-    endpoint = `${supabaseUrl}/rest/v1/affiliate_links?price=gt.0&order=id.desc&limit=${pageSize}&offset=${offset}`;
+    lazadaEndpoint = `${supabaseUrl}/rest/v1/affiliate_links?price=gt.0&order=id.desc&limit=${pageSize}&offset=${halfOffset}`;
+    shopeeEndpoint = `${supabaseUrl}/rest/v1/shopee_affiliate_links?shopee_price=gt.0&order=id.desc&limit=${pageSize}&offset=${halfOffset}`;
   } else if (mode === "random") {
     headerTitle = `🎲 <b>Cadangan Produk Pilihan:</b>`;
-    endpoint = `${supabaseUrl}/rest/v1/affiliate_links?order=id.desc&limit=${pageSize}&offset=${offset}`;
+    lazadaEndpoint = `${supabaseUrl}/rest/v1/affiliate_links?order=id.desc&limit=${pageSize}&offset=${halfOffset}`;
+    shopeeEndpoint = `${supabaseUrl}/rest/v1/shopee_affiliate_links?order=id.desc&limit=${pageSize}&offset=${halfOffset}`;
   }
 
-  // Dapatkan 10 produk semasa berserta jumlah keseluruhan (Content-Range Header)
-  const { data: products, totalCount } = await fetchSupabaseWithCount(endpoint, env);
+  // Panggil kedua-dua jadual serentak menggunakan Promise.all untuk kelajuan maksimum
+  const [lazadaRes, shopeeRes] = await Promise.all([
+    fetchSupabaseWithCount(lazadaEndpoint, env),
+    fetchSupabaseWithCount(shopeeEndpoint, env)
+  ]);
+
+  const lazadaItems = (lazadaRes.data || []).map(item => normalizeProduct(item, "Lazada")).filter(Boolean);
+  const shopeeItems = (shopeeRes.data || []).map(item => normalizeProduct(item, "Shopee")).filter(Boolean);
+
+  // Selang-selikan produk (Shopee & Lazada) secara seimbang
+  const combinedProducts = [];
+  const maxItems = Math.max(lazadaItems.length, shopeeItems.length);
+  for (let i = 0; i < maxItems; i++) {
+    if (i < shopeeItems.length) combinedProducts.push(shopeeItems[i]);
+    if (i < lazadaItems.length) combinedProducts.push(lazadaItems[i]);
+  }
+
+  const products = combinedProducts.slice(0, pageSize);
+  const totalCount = (lazadaRes.totalCount || 0) + (shopeeRes.totalCount || 0);
 
   if (!products || products.length === 0) {
     const emptyKeyboard = {
@@ -263,22 +321,23 @@ async function fetchAndShowProductList(chatId, env, mode, param = "", page = 1, 
         [{ text: "🏠 Menu Utama", callback_data: "menu:main" }]
       ]
     };
-    await sendOrEditMessage(chatId, `${headerTitle}\n\n😔 <b>Maaf, tiada rekod barangan dijumpai.</b> Sila cuba carian kata kunci lain.`, emptyKeyboard, env, messageId);
+    await sendOrEditMessage(chatId, `${headerTitle}\n\n😔 <b>Maaf, tiada rekod barangan dijumpai di Shopee atau Lazada.</b> Sila cuba carian kata kunci lain.`, emptyKeyboard, env, messageId);
     return;
   }
 
   const totalPages = Math.ceil(totalCount / pageSize) || 1;
   const numEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
 
-  // 1. Bina Teks Senarai Barangan Lengkap (Jelas & Bebas Terpotong)
+  // 1. Bina Teks Senarai Barangan Lengkap (Berserta Lencana Platform Shopee/Lazada)
   let productListText = "";
   for (let i = 0; i < products.length; i++) {
     const item = products[i];
     const itemNum = numEmojis[i] || `${i + 1}️⃣`;
     const priceDisplay = item.price && item.price > 0 ? `RM ${Number(item.price).toFixed(2)}` : `Tawaran`;
-    const cleanTitle = sanitizeFullCatalogTitle(item.title, 75);
+    const platformBadge = item.platform === "Shopee" ? "🟠 Shopee" : "🔵 Lazada";
+    const cleanTitle = sanitizeFullCatalogTitle(item.title, 70);
 
-    productListText += `${itemNum} <b>[${priceDisplay}]</b> ${escapeHtml(cleanTitle)}\n\n`;
+    productListText += `${itemNum} <b>[${platformBadge} | ${priceDisplay}]</b> ${escapeHtml(cleanTitle)}\n\n`;
   }
 
   // 2. Bina Grid Butang Nombor Responsif (Baris 1: 1-5 | Baris 2: 6-10)
@@ -342,15 +401,29 @@ async function fetchAndShowProductList(chatId, env, mode, param = "", page = 1, 
 }
 
 /* =============================================================================
- * 🖼️ PAPARAN KAD PRODUK TUNGGAL (VIRAL SHARE & HUMAN-FRIENDLY TITLE)
+ * 🖼️ PAPARAN KAD PRODUK TUNGGAL (SEMAK KEDUA-DUA JADUAL AUTOMATIK)
  * ============================================================================= */
 
 async function showSingleProductDetail(chatId, productId, env) {
   const { supabaseUrl } = getKeys(env);
-  const endpoint = `${supabaseUrl}/rest/v1/affiliate_links?product_id=eq.${encodeURIComponent(productId)}&limit=1`;
+  const cleanId = encodeURIComponent(productId.trim());
+
+  const lazadaEndpoint = `${supabaseUrl}/rest/v1/affiliate_links?product_id=eq.${cleanId}&limit=1`;
+  const shopeeEndpoint = `${supabaseUrl}/rest/v1/shopee_affiliate_links?shopee_product_id=eq.${cleanId}&limit=1`;
   
-  const results = await fetchSupabase(endpoint, env);
-  if (!results || results.length === 0) {
+  const [lazadaRes, shopeeRes] = await Promise.all([
+    fetchSupabase(lazadaEndpoint, env),
+    fetchSupabase(shopeeEndpoint, env)
+  ]);
+
+  let item = null;
+  if (shopeeRes && shopeeRes.length > 0) {
+    item = normalizeProduct(shopeeRes[0], "Shopee");
+  } else if (lazadaRes && lazadaRes.length > 0) {
+    item = normalizeProduct(lazadaRes[0], "Lazada");
+  }
+
+  if (!item) {
     await callTelegram(env, "sendMessage", {
       chat_id: chatId,
       text: "⚠️ Maklumat barangan ini tidak dijumpai atau telah dikemas kini.",
@@ -359,18 +432,20 @@ async function showSingleProductDetail(chatId, productId, env) {
     return;
   }
 
-  const item = results[0];
   const priceFormatted = item.price && item.price > 0 ? `RM ${Number(item.price).toFixed(2)}` : `Sila semak di pautan rasmi`;
   const cleanDetailTitle = cleanProductDetailTitle(item.title, 85);
+  const platformLabel = item.platform === "Shopee" ? "🟠 Shopee Mall / Preferred" : "🔵 Lazada LazMall";
+  const buyButtonText = item.platform === "Shopee" ? "🛒 Beli di Shopee (Pautan Rasmi)" : "🛒 Beli di Lazada (Pautan Rasmi)";
   
   // Pautan Telegram Viral Share
-  const shareText = `Tengok gajet padu ni: ${cleanDetailTitle} (${priceFormatted})`;
+  const shareText = `Tengok tawaran ${item.platform} ni: ${cleanDetailTitle} (${priceFormatted})`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(item.affiliate_link)}&text=${encodeURIComponent(shareText)}`;
   const catKey = getCategoryKeyByName(item.category);
 
   const caption = 
     `📦 <b>${escapeHtml(cleanDetailTitle)}</b>\n\n` +
     `🏷️ <b>Kategori:</b> ${escapeHtml(item.category || "Umum")}\n` +
+    `🏬 <b>Platform:</b> ${platformLabel}\n` +
     `💰 <b>Harga Tawaran:</b> ${priceFormatted}\n` +
     `🛡️ <b>Jaminan:</b> 100% Produk Original & Penjual Sah\n` +
     `🚚 <b>Penghantaran:</b> Pantas & Selamat ke Seluruh Malaysia\n\n` +
@@ -378,7 +453,7 @@ async function showSingleProductDetail(chatId, productId, env) {
 
   const keyboard = {
     inline_keyboard: [
-      [{ text: "🛒 Beli / Lihat Tawaran Rasmi", url: item.affiliate_link }],
+      [{ text: buyButtonText, url: item.affiliate_link }],
       [{ text: "📤 Kongsi Racun Ni ke WhatsApp/Telegram", url: shareUrl }],
       [
         { text: "🔍 Teroka Kategori Sama", callback_data: `cat:${catKey}` },
@@ -510,14 +585,12 @@ function escapeHtml(text) {
 function sanitizeFullCatalogTitle(title, maxLen = 75) {
   if (!title) return "Barangan Terpilih";
   
-  // 1. Buang tag kurungan mentah carian e-dagang (termasuk kurungan Cina 【 】)
   let clean = title
     .replace(/[\[【][^\]】]*[\]】]/gi, " ")
     .replace(/[\(\)\#\|\/\\]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  // 2. Buang pengulangan jenama berturut-turut (contoh: "ATTACK SHARK Attack Shark")
   const words = clean.split(" ");
   const uniqueWords = [];
   for (let w of words) {
