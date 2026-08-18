@@ -4,8 +4,9 @@ Master Execution Runner for Affiliate Product Reels (Facebook, Instagram & Threa
 Sembang PC & Tech Ecosystem (3x Daily)
 Features:
 - Dedicated AI Personas tailored for Facebook Reels, Instagram Reels & Threads Video.
-- 100% Strict Zero-Emoji & Glitch-Proof Filters (Prevents UTF-8 / Mojibake corruption).
+- 100% Strict Zero-Emoji, Anti-Gibberish & Glitch-Proof Filters.
 - Direct Affiliate Link Injection in IG Reels Caption (Auto-syncs clickable URL to Pinterest).
+- Instagram Bio & Telegram Search CTA Integration.
 - Tailored character limits (IG/Pinterest: 350-450 chars, Threads: <480 chars, FB: 350-500 chars).
 - Local MoviePy MP4 stitching using original image size/ratio with background music.
 - Multi-platform publishing (FB Reels + Comment link, IG Reels, Threads via Backblaze B2).
@@ -51,8 +52,16 @@ from src.pexels_reel_bot_threads import threads_reel_bot
 
 
 # =============================================================================
-# 1. ENJIN PEMBERSIHAN TEKS (STRICT ZERO-EMOJI & MOJIBAKE GUARDRAILS)
+# 1. ENJIN PEMBERSIHAN TEKS & TAPISAN KUALITI BAHASA (GLITCH-PROOF)
 # =============================================================================
+
+MALAY_ANCHOR_WORDS = {
+    "yang", "dan", "di", "ke", "kat", "ni", "tu", "dah", "nak", "ada",
+    "kita", "korang", "saya", "buat", "bila", "dengan", "pun", "rasa",
+    "meja", "setup", "pc", "kerja", "santai", "tengok", "dalam", "untuk",
+    "tak", "bukan", "memang", "lagi", "hujung", "minggu", "malam", "pagi", "petang"
+}
+
 
 def remove_emojis_and_glitches(text: str) -> str:
     """Membersihkan token LLM, mojibake dan 100% emoji Unicode."""
@@ -90,6 +99,32 @@ def remove_emojis_and_glitches(text: str) -> str:
 
     lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
     return "\n".join([line for line in lines if line]).strip()
+
+
+def is_valid_malay_caption(text: str) -> bool:
+    """Menyemak kualiti teks bagi menolak sebarang ayat rosak atau token berulang."""
+    if not text or len(text.strip()) < 80:
+        return False
+    if "<pad>" in text.lower() or "<unk>" in text.lower():
+        return False
+
+    # Tolak jika ada perkataan berulang 3 kali berturut-turut
+    if re.search(r'(\b\w+\b)(?:\s+\1){2,}', text, flags=re.IGNORECASE):
+        return False
+
+    words = [w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', text)]
+    if len(words) < 15:
+        return False
+
+    unique_words = set(words)
+    if len(unique_words) / len(words) < 0.40:
+        return False
+
+    matching_anchors = unique_words.intersection(MALAY_ANCHOR_WORDS)
+    if len(matching_anchors) < 2:
+        return False
+
+    return True
 
 
 def extract_search_keyword(title: str, max_words: int = 3) -> str:
@@ -182,7 +217,6 @@ def build_product_reel_video(image_url: str, music_dir: Path, duration: int = 8)
         else:
             clip = clip.set_duration(duration)
 
-        # Kekalkan saiz dan nisbah asal (pastikan dimensi genap untuk keserasian H.264 / ffmpeg)
         w, h = clip.size
         if w % 2 != 0 or h % 2 != 0:
             even_w = w - (w % 2)
@@ -192,7 +226,6 @@ def build_product_reel_video(image_url: str, music_dir: Path, duration: int = 8)
             elif hasattr(clip, "resize"):
                 clip = clip.resize((even_w, even_h))
 
-        # Pasangkan muzik latar
         bg_audio, music_title = get_random_local_music(music_dir, target_duration=duration)
         if bg_audio:
             if hasattr(clip, "with_audio"):
@@ -235,8 +268,9 @@ def generate_fb_reel_caption(base_url: str, model: str, api_key: str, title: str
     Menjana kapsyen penceritaan masalah & solusi perkakasan untuk Facebook Reels.
     Panjang sasaran: 350 - 500 aksara | Sifar Emoji | CTA di ruangan komen.
     """
+    clean_title = re.sub(r'\s+', ' ', title)[:65].strip()
     fallback = (
-        f"Korang yang tengah pening mencari kelengkapan kemas untuk upgrade setup meja, tengok {title[:50]} ni.\n\n"
+        f"Korang yang tengah pening mencari kelengkapan kemas untuk upgrade setup meja, tengok {clean_title} ni.\n\n"
         f"Kualiti binaan memang kukuh dan praktikal untuk kegunaan harian tanpa serabut. "
         f"Pilihan tepat untuk pastikan ruang kerja atau gaming korang kekal teratur dan selesa.\n\n"
         f"Pautan pembelian rasmi kami sediakan di ruangan komen di bawah.\n\n"
@@ -252,7 +286,7 @@ def generate_fb_reel_caption(base_url: str, model: str, api_key: str, title: str
     prompt = f"""
 Anda adalah "Brader Din", Tech Enthusiast Malaysia di komuniti Facebook Sembang PC & Tech.
 Video Reel produk ini memaparkan:
-- Produk: {title}
+- Produk: {clean_title}
 - Kategori: {category}
 - Tawaran: RM {price if price else 'Promosi Berbaloi'}
 
@@ -274,6 +308,7 @@ PANDUAN PENULISAN FACEBOOK REELS (SANGAT KETAT):
         ],
         "temperature": 0.65,
         "max_tokens": 400,
+        "frequency_penalty": 0.3,
     }
 
     try:
@@ -281,7 +316,7 @@ PANDUAN PENULISAN FACEBOOK REELS (SANGAT KETAT):
         if res.status_code == 200:
             raw = res.json()["choices"][0]["message"]["content"].strip()
             clean = remove_emojis_and_glitches(raw)
-            if len(clean) >= 120:
+            if is_valid_malay_caption(clean) and len(clean) >= 120:
                 return clean
     except Exception as e:
         print(f"⚠️ [FB REEL AI WARN] {e}")
@@ -300,19 +335,20 @@ def generate_ig_reel_caption(
 ) -> str:
     """
     Menjana kapsyen Instagram Reels (350 - 450 aksara) berstruktur penuh,
-    mengandungi pautan affiliate terus (boleh klik di Pinterest Sync) & Sifar Emoji.
+    mengandungi pautan affiliate terus (boleh klik di Pinterest Sync) & CTA Bio Telegram.
     """
+    clean_title = re.sub(r'\s+', ' ', title)[:60].strip()
     search_kw = extract_search_keyword(title)
     clean_aff_link = aff_link.strip() if aff_link else ""
 
     fallback = (
         f"Korang yang tengah cari kelengkapan baru yang mantap, tengok barang ni!\n\n"
-        f"Barang: {title[:50]}\n"
+        f"Barang: {clean_title}\n"
         f"Tawaran: RM {price if price else 'Promosi Berbaloi'}\n\n"
         f"• Kualiti binaan kemas & sangat praktikal\n"
         f"• Nilai terbaik untuk bajet upgrade korang\n\n"
         f"Pautan Rasmi: {clean_aff_link}\n"
-        f"Atau taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot\n\n"
+        f"Atau tekan link di Bio & taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot\n\n"
         f"#RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY"
     )
 
@@ -326,7 +362,7 @@ Anda adalah "Brader Din", pencipta kandungan Instagram & Pinterest Sembang PC & 
 Hantaran Instagram Reel ini akan disegerakkan terus ke papan Pinterest.
 
 MAKLUMAT PRODUK:
-- Nama Produk: {title}
+- Nama Produk: {clean_title}
 - Kategori: {category}
 - Harga: RM {price if price else 'Promosi Berbaloi'}
 - Pautan Affiliate Rasmi: {clean_aff_link}
@@ -336,11 +372,11 @@ STRUKTUR WAJIB KAPSYEN INSTAGRAM (SANGAT KETAT):
 1. LARANGAN MUTLAK EMOJI: Sifar emoji dan sifar simbol mojibake.
 2. Fasa 1 (SEO Title): Sebut nama produk dengan jelas di 2 baris terawal.
 3. Fasa 2 (Ulasan): 1 ulasan ringkas diikuti tepat 2 kelebihan produk menggunakan simbol bullet point (•).
-4. Fasa 3 (Call-To-Action Dwi-Fungsi Pinterest & Telegram):
+4. Fasa 3 (Call-To-Action Dwi-Fungsi Pinterest & Instagram Bio - WAJIB):
    - Letakkan pautan belian rasmi secara terus:
      "Pautan Rasmi: {clean_aff_link}"
-   - Tambah panduan carian Telegram (JANGAN letak '@' sebelum nama bot):
-     "Atau taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot"
+   - Tambah panduan carian Bio & Telegram (JANGAN letak '@' sebelum nama bot):
+     "Atau tekan link di Bio & taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot"
 5. Fasa 4 (Hashtags): #RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY
 6. PANJANG TEKS: Wajib DI ANTARA 350 HINGGA 450 AKSARA (agar tidak terpotong di Pinterest).
 """
@@ -353,6 +389,7 @@ STRUKTUR WAJIB KAPSYEN INSTAGRAM (SANGAT KETAT):
         ],
         "temperature": 0.65,
         "max_tokens": 400,
+        "frequency_penalty": 0.3,
     }
 
     try:
@@ -360,8 +397,8 @@ STRUKTUR WAJIB KAPSYEN INSTAGRAM (SANGAT KETAT):
         if res.status_code == 200:
             raw = res.json()["choices"][0]["message"]["content"].strip()
             clean = remove_emojis_and_glitches(raw)
-            if len(clean) >= 180:
-                # Pastikan link tidak tertinggal
+            # Wajib sah bahasa Melayu & tidak berulang
+            if is_valid_malay_caption(clean) and len(clean) >= 180:
                 if clean_aff_link and clean_aff_link not in clean:
                     clean = f"{clean}\n\nPautan Rasmi: {clean_aff_link}"
                 return clean
@@ -376,7 +413,7 @@ def generate_threads_video_caption(base_url: str, model: str, api_key: str, titl
     Menjana kapsyen mikro-blog ringkas untuk Threads Video Feed.
     Panjang sasaran: 180 - 240 aksara (Teks) + Pautan Belian (Jumlah < 480 aksara) | Sifar Emoji.
     """
-    clean_title = title[:50].strip()
+    clean_title = re.sub(r'\s+', ' ', title)[:50].strip()
     aff_text = f"\n\nPautan rasmi di sini: {aff_link}"
     fallback = f"Korang yang tengah cari {clean_title}, barang ni memang padu dan berbaloi untuk kemaskan ruang kerja.{aff_text}"
 
@@ -387,7 +424,7 @@ def generate_threads_video_caption(base_url: str, model: str, api_key: str, titl
 
     prompt = f"""
 Tuliskan ulasan ringkas racun tech untuk video Threads Malaysia.
-PRODUK: {title}
+PRODUK: {clean_title}
 
 SYARAT PENULISAN:
 1. Bahasa Melayu santai harian Malaysia.
@@ -405,6 +442,7 @@ SYARAT PENULISAN:
         ],
         "temperature": 0.65,
         "max_tokens": 180,
+        "frequency_penalty": 0.2,
     }
 
     try:
@@ -412,9 +450,10 @@ SYARAT PENULISAN:
         if res.status_code == 200:
             raw = res.json()["choices"][0]["message"]["content"].strip()
             clean = remove_emojis_and_glitches(raw)
-            full_threads_text = f"{clean}{aff_text}".strip()
-            if len(full_threads_text) <= 490:
-                return full_threads_text
+            if is_valid_malay_caption(clean):
+                full_threads_text = f"{clean}{aff_text}".strip()
+                if len(full_threads_text) <= 490:
+                    return full_threads_text
     except Exception as e:
         print(f"⚠️ [THREADS AI WARN] {e}")
 
@@ -451,7 +490,6 @@ def send_full_telegram_audit(
     ig_status = f"✅ <a href='{ig_res.get('permalink', '')}'>Buka IG Reel</a>" if ig_ok else f"❌ Gagal ({ig_res.get('error', '')})"
     th_status = f"✅ <a href='{th_res.get('permalink', '')}'>Buka Threads Video</a>" if th_ok else f"❌ Gagal ({th_res.get('error', '')})"
 
-    # Mesej Ringkasan Status
     summary_message = (
         f"🎬 <b>[AUDIT PEMPOSAN AFFILIATE REELS 3X DAILY]</b> 🇲🇾\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -466,7 +504,6 @@ def send_full_telegram_audit(
         f"⏰ <i>Waktu Larian: {time.strftime('%Y-%m-%d %H:%M:%S')} MYT</i>"
     )
 
-    # Mesej Kapsyen FB, IG & Threads
     captions_message = (
         f"📝 <b>[AUDIT KAPSYEN FACEBOOK REELS]:</b>\n"
         f"<code>{fb_caption}</code>\n\n"
@@ -477,7 +514,6 @@ def send_full_telegram_audit(
     )
 
     try:
-        # Hantar gambar bersama ringkasan status
         if image_url:
             url_photo = f"https://api.telegram.org/bot{token}/sendPhoto"
             requests.post(url_photo, data={"chat_id": chat_id, "photo": image_url, "caption": summary_message[:1024], "parse_mode": "HTML"}, timeout=20)
@@ -485,7 +521,6 @@ def send_full_telegram_audit(
             url_msg = f"https://api.telegram.org/bot{token}/sendMessage"
             requests.post(url_msg, data={"chat_id": chat_id, "text": summary_message, "parse_mode": "HTML"}, timeout=20)
 
-        # Hantar teks audit kapsyen lengkap
         url_msg = f"https://api.telegram.org/bot{token}/sendMessage"
         requests.post(url_msg, data={"chat_id": chat_id, "text": captions_message, "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=20)
     except Exception as e:

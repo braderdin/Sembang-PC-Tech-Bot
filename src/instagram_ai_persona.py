@@ -3,7 +3,8 @@
 Instagram AI Persona Engine (Brader Din Style - Pinterest & Telegram Optimized)
 Sembang PC & Tech Ecosystem (100% Dynamic OpenRouter & Glitch-Proof)
 Features:
-- Dual-Action Call-To-Action (Direct Affiliate URL for Pinterest Sync + Telegram Search Keyword)
+- Dual-Action Call-To-Action (Direct Affiliate URL for Pinterest Sync + Bio / Telegram Search Hook)
+- Glitch & Repetition Guardrails (Rejects gibberish & token-loop errors)
 - Target Character Window: 350 - 450 Characters (Fits perfectly in Pinterest 500-char limit)
 - Instagram & Pinterest SEO Optimization (Product title in first 2 lines)
 - Standardized Clean Hashtag Strategy (#RacunGajet, #SembangPCTech, #LazadaMY)
@@ -39,8 +40,7 @@ def clean_glitches_and_meta_chatter(text: str) -> str:
     text = re.sub(r'[\x80-\x9f]', '', text)
 
     # 3. Standardkan simbol bullet point
-    special_bullets = ["❖", "◆", "◇", "►", "▪", "▲", "★", "➡", "➢", "*"]
-    for sym in special_bullets:
+    for sym in ["❖", "◆", "◇", "►", "▪", "▲", "★", "➡", "➢", "*"]:
         text = text.replace(sym, "•")
 
     # 4. Buang mukadimah pembantu AI di awal teks
@@ -80,10 +80,14 @@ def extract_search_keyword(title: str, max_words: int = 3) -> str:
 
 
 def is_valid_ig_caption(text: str) -> bool:
-    """Menyemak kualiti teks bagi memastikan kapsyen menepati piawaian bahasa Melayu."""
+    """Menyemak kualiti teks bagi mengelakkan ayat rosak atau token berulang."""
     if not text or len(text.strip()) < 80:
         return False
     if "<pad>" in text.lower() or "<unk>" in text.lower():
+        return False
+
+    # Mengesan jika ada perkataan berulang lebih 3 kali berturut-turut
+    if re.search(r'(\b\w+\b)(?:\s+\1){2,}', text, flags=re.IGNORECASE):
         return False
 
     words = [w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', text)]
@@ -91,7 +95,8 @@ def is_valid_ig_caption(text: str) -> bool:
         return False
 
     unique_words = set(words)
-    if len(unique_words) / len(words) < 0.35:
+    # Jika nisbah kepelbagaian perkataan terlalu rendah (tanda teks merepek)
+    if len(unique_words) / len(words) < 0.40:
         return False
 
     matching_anchors = unique_words.intersection(MALAY_ANCHOR_WORDS)
@@ -127,14 +132,14 @@ class InstagramAIPersona:
                 {"role": "user", "content": user_prompt.strip()},
             ],
             "temperature": 0.65,
-            "max_tokens": 550,
-            "frequency_penalty": 0.0,
-            "presence_penalty": 0.0,
+            "max_tokens": 450,
+            "frequency_penalty": 0.3,
+            "presence_penalty": 0.1,
         }
 
         for attempt in range(2):
             try:
-                res = requests.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=30)
+                res = requests.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=25)
                 res.encoding = "utf-8"
                 if res.status_code == 200:
                     data = res.json()
@@ -151,39 +156,41 @@ class InstagramAIPersona:
     def generate_affiliate_caption(self, product_data: Dict[str, Any]) -> str:
         """
         Menjana kapsyen Instagram Feed & Pinterest Sync (350 - 450 Aksara)
-        mengandungi pautan affiliate terus (boleh klik di Pinterest) & CTA Telegram.
+        mengandungi pautan affiliate terus (boleh klik di Pinterest) & CTA Telegram/Bio.
         """
-        title = product_data.get("title", "Gajet Pilihan")
+        raw_title = str(product_data.get("title", "Gajet Pilihan")).strip()
+        # Bersihkan tajuk panjang & buang perkataan bertindih
+        clean_title = re.sub(r'\s+', ' ', raw_title)[:65].strip()
         price = product_data.get("price", "")
         category = product_data.get("category", "Gajet & Komputer")
         aff_link = str(product_data.get("affiliate_link") or product_data.get("promo_short_link") or "").strip()
-        search_kw = extract_search_keyword(title)
+        search_kw = extract_search_keyword(raw_title)
 
         system_prompt = f"""
 Anda adalah "Brader Din", pencipta kandungan teknologi di Instagram & Pinterest Sembang PC & Tech Malaysia.
 Hantaran ini akan disegerakkan secara automatik dari Instagram ke papan Pinterest.
 
 STRUKTUR WAJIB KAPSYEN (ZON EMAS: 350 HINGGA 450 AKSARA):
-1. Fasa 1 (Hook & Tajuk Produk SEO):
-   - Sebut nama produk dengan jelas di 2 baris terawal.
+1. Fasa 1 (Hook & Tajuk Produk):
+   - Sebut nama produk dengan ringkas dan jelas di awal teks.
 2. Fasa 2 (Ulasan Padat):
    - 1 perenggan ulasan ringkas dan senaraikan tepat 2 kelebihan utama menggunakan simbol bullet point (•).
-3. Fasa 3 (Call To Action Dwi-Fungsi Pinterest & Telegram - WAJIB):
-   - Letakkan pautan belian rasmi secara terus:
+3. Fasa 3 (Call To Action Dwi-Fungsi Pinterest & Instagram Bio - WAJIB):
+   - Letakkan pautan belian rasmi:
      "🔗 Pautan Rasmi: {aff_link}"
-   - Tambah panduan carian Telegram (JANGAN letak '@' sebelum nama bot):
-     "👉 Atau taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot"
-4. Fasa 4 (Hashtags Rasmi):
+   - Tambah panduan carian Bio & Telegram (JANGAN letak '@' sebelum nama bot):
+     "👉 Atau tekan link di Bio & taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot"
+4. Fasa 4 (Hashtags):
    - #RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY
 
 PANDUAN KETAT:
-- WAJIB kekalkan panjang keseluruhan teks di antara 350 HINGGA 450 AKSARA (agar tidak terpotong di Pinterest Description).
+- WAJIB kekalkan panjang keseluruhan teks di antara 350 HINGGA 450 AKSARA (agar tidak terpotong di Pinterest).
 - DILARANG letak simbol '@' pada perkataan nama bot Telegram.
-- TERUS TULIS AYAT KANDUNGAN TANPA sebarang mukadimah AI ("Berikut adalah...", "Ini cadangan...").
+- TERUS TULIS AYAT KANDUNGAN TANPA sebarang mukadimah AI.
 """
         user_prompt = f"""
 Sila hasilkan kapsyen lengkap untuk produk ini:
-Nama Produk: {title}
+Produk: {clean_title}
 Kategori: {category}
 Harga / Anggaran: RM {price if price else 'Promosi Berbaloi'}
 Pautan Affiliate: {aff_link}
@@ -193,16 +200,16 @@ Tuliskan teks lengkap (350-450 aksara) sekarang:
 """
         caption = self._call_openrouter(system_prompt, user_prompt)
 
-        # Fallback Berstruktur & Bersih jika API OpenRouter sibuk
+        # Fallback Berstruktur & Bersih jika AI gagal melepasi tapisan
         if not caption or aff_link not in caption:
             price_display = f"\n💰 Tawaran: RM {price}" if price else ""
             caption = (
                 f"Korang yang tengah nak upgrade setup meja, tengok yang ni! ⚡\n\n"
-                f"📦 {title[:60]}{price_display}\n\n"
+                f"📦 {clean_title}{price_display}\n\n"
                 f"• Kualiti binaan kemas & sangat praktikal\n"
                 f"• Nilai berbaloi untuk ruang kerja selesa\n\n"
                 f"🔗 Pautan Rasmi: {aff_link}\n"
-                f"👉 Atau taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot\n\n"
+                f"👉 Atau tekan link di Bio & taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot\n\n"
                 f"#RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY"
             )
         return caption
