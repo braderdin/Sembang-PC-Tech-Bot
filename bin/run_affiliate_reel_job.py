@@ -5,7 +5,8 @@ Sembang PC & Tech Ecosystem (3x Daily)
 Features:
 - Dedicated AI Personas tailored for Facebook Reels, Instagram Reels & Threads Video.
 - 100% Strict Zero-Emoji & Glitch-Proof Filters (Prevents UTF-8 / Mojibake corruption).
-- Rich text generation optimized for the specific character limits of each platform.
+- Direct Affiliate Link Injection in IG Reels Caption (Auto-syncs clickable URL to Pinterest).
+- Tailored character limits (IG/Pinterest: 350-450 chars, Threads: <480 chars, FB: 350-500 chars).
 - Local MoviePy MP4 stitching using original image size/ratio with background music.
 - Multi-platform publishing (FB Reels + Comment link, IG Reels, Threads via Backblaze B2).
 - Detailed Telegram audit report dispatch with all platform captions and status links.
@@ -54,28 +55,17 @@ from src.pexels_reel_bot_threads import threads_reel_bot
 # =============================================================================
 
 def remove_emojis_and_glitches(text: str) -> str:
-    """
-    Membersihkan teks daripada:
-    1. Token LLM (<pad>, <unk>, dsb).
-    2. Simbol mojibake / encoding glitch (ð, â, dsb).
-    3. 100% Emoji Unicode bagi mengelakkan ralat paparan di platform Meta.
-    4. Mukadimah AI ("Berikut adalah...", "**Caption:**").
-    """
+    """Membersihkan token LLM, mojibake dan 100% emoji Unicode."""
     if not text:
         return ""
 
-    # Buang token khas LLM
     text = re.sub(r'<pad>|<unk>|<s>|</s>|\[PAD\]|\[UNK\]|<\|.*?\|>', '', text, flags=re.IGNORECASE)
-
-    # Buang simbol mojibake / glitch encoding
     text = re.sub(r'[ðâ][\x80-\xbf]{1,4}', '', text)
     text = re.sub(r'[\x80-\x9f]', '', text)
 
-    # Standardkan simbol bullet point
     for sym in ["❖", "◆", "◇", "►", "▪", "▲", "★", "➡", "➢", "*"]:
         text = text.replace(sym, "•")
 
-    # Buang emoji secara menyeluruh menggunakan pola Unicode rasmi
     emoji_pattern = re.compile(
         "["
         "\U0001f600-\U0001f64f"
@@ -91,13 +81,11 @@ def remove_emojis_and_glitches(text: str) -> str:
     )
     text = emoji_pattern.sub("", text)
 
-    # Buang mukadimah dan tips tambahan LLM
     text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption)[^\n]*?\n+', '', text)
     text = re.sub(r'(?i)\*\*caption\s*(?:reels?|instagram|threads)?\s*:\*\*', '', text)
     text = re.sub(r'(?i)\n+\s*\*{0,2}tips\s*tambahan[^\n]*\*{0,2}[\s\S]*$', '', text)
     text = re.sub(r'\*\*\*', '', text)
 
-    # Tapis aksara asing bukan Rumi (kekalkan abjad, nombor, tanda baca biasa dan bullet •)
     text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\s.,!?:;\'"()/\-#@+•]', '', text)
 
     lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
@@ -301,23 +289,31 @@ PANDUAN PENULISAN FACEBOOK REELS (SANGAT KETAT):
     return fallback
 
 
-def generate_ig_reel_caption(base_url: str, model: str, api_key: str, title: str, category: str, price: str) -> str:
+def generate_ig_reel_caption(
+    base_url: str,
+    model: str,
+    api_key: str,
+    title: str,
+    category: str,
+    price: str,
+    aff_link: str,
+) -> str:
     """
-    Menjana kapsyen Instagram Reels berstruktur penuh dengan SEO tajuk produk & bullet points.
-    Panjang sasaran: 450 - 650 aksara | Sifar Emoji | CTA ke Bio / Telegram Bot.
+    Menjana kapsyen Instagram Reels (350 - 450 aksara) berstruktur penuh,
+    mengandungi pautan affiliate terus (boleh klik di Pinterest Sync) & Sifar Emoji.
     """
     search_kw = extract_search_keyword(title)
+    clean_aff_link = aff_link.strip() if aff_link else ""
+
     fallback = (
         f"Korang yang tengah cari kelengkapan baru yang mantap, tengok barang ni!\n\n"
-        f"Barang: {title}\n"
-        f"Anggaran Tawaran: RM {price if price else 'Promosi'}\n\n"
-        f"Kualiti binaan memang kemas dan praktikal untuk kegunaan harian. "
-        f"Setup meja korang pasti nampak makin teratur dan selesa bila ada barang ni.\n\n"
-        f"• Rekaan moden dan kemas untuk meja kerja\n"
-        f"• Material tahan lasak dan kualiti terjamin\n"
+        f"Barang: {title[:50]}\n"
+        f"Tawaran: RM {price if price else 'Promosi Berbaloi'}\n\n"
+        f"• Kualiti binaan kemas & sangat praktikal\n"
         f"• Nilai terbaik untuk bajet upgrade korang\n\n"
-        f"Nak link pembelian rasmi? Tekan link di Bio kami (atau buka Telegram Bot: lubuk_barang_murah_padu_bot) dan taip carian: \"{search_kw}\" untuk terus dapat kad info dan pautan belian pantas.\n\n"
-        f"#RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY #ShopeeMY"
+        f"Pautan Rasmi: {clean_aff_link}\n"
+        f"Atau taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot\n\n"
+        f"#RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY"
     )
 
     if not base_url or not model or not api_key:
@@ -326,32 +322,37 @@ def generate_ig_reel_caption(base_url: str, model: str, api_key: str, title: str
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json; charset=utf-8"}
 
     prompt = f"""
-Anda adalah "Brader Din", pencipta kandungan Instagram Sembang PC & Tech Malaysia.
-Hasilkan kapsyen Instagram Reels berstruktur bagi produk:
-- Nama Penuh Produk: {title}
+Anda adalah "Brader Din", pencipta kandungan Instagram & Pinterest Sembang PC & Tech Malaysia.
+Hantaran Instagram Reel ini akan disegerakkan terus ke papan Pinterest.
+
+MAKLUMAT PRODUK:
+- Nama Produk: {title}
 - Kategori: {category}
-- Harga: RM {price if price else 'Promosi'}
+- Harga: RM {price if price else 'Promosi Berbaloi'}
+- Pautan Affiliate Rasmi: {clean_aff_link}
 - Kata Kunci Carian Telegram: {search_kw}
 
 STRUKTUR WAJIB KAPSYEN INSTAGRAM (SANGAT KETAT):
-1. LARANGAN MUTLAK EMOJI: DILARANG letak sebarang emoji atau simbol mojibake.
+1. LARANGAN MUTLAK EMOJI: Sifar emoji dan sifar simbol mojibake.
 2. Fasa 1 (SEO Title): Sebut nama produk dengan jelas di 2 baris terawal.
-3. Fasa 2 (Ulasan): 1 perenggan ulasan kualiti, diikuti tepat 3 kelebihan produk menggunakan simbol bullet point (•).
-4. Fasa 3 (Call-To-Action):
-   Gunakan ayat tepat ini (JANGAN letak simbol '@' sebelum nama bot Telegram):
-   "Nak link pembelian rasmi? Tekan link di Bio kami (atau buka Telegram Bot: lubuk_barang_murah_padu_bot) dan taip carian: \"{search_kw}\" untuk terus dapat kad info dan pautan belian pantas."
-5. Fasa 4 (Hashtags): #RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY #ShopeeMY
-6. PANJANG TEKS: Wajib antara 450 HINGGA 650 AKSARA.
+3. Fasa 2 (Ulasan): 1 ulasan ringkas diikuti tepat 2 kelebihan produk menggunakan simbol bullet point (•).
+4. Fasa 3 (Call-To-Action Dwi-Fungsi Pinterest & Telegram):
+   - Letakkan pautan belian rasmi secara terus:
+     "Pautan Rasmi: {clean_aff_link}"
+   - Tambah panduan carian Telegram (JANGAN letak '@' sebelum nama bot):
+     "Atau taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot"
+5. Fasa 4 (Hashtags): #RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #LazadaMY
+6. PANJANG TEKS: Wajib DI ANTARA 350 HINGGA 450 AKSARA (agar tidak terpotong di Pinterest).
 """
 
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "Tulis kapsyen Instagram Reels mengikut format berstruktur tanpa emoji."},
+            {"role": "system", "content": "Tulis kapsyen Instagram Reels mengikut format berstruktur 350-450 aksara tanpa sebarang emoji."},
             {"role": "user", "content": prompt.strip()},
         ],
         "temperature": 0.65,
-        "max_tokens": 500,
+        "max_tokens": 400,
     }
 
     try:
@@ -359,7 +360,10 @@ STRUKTUR WAJIB KAPSYEN INSTAGRAM (SANGAT KETAT):
         if res.status_code == 200:
             raw = res.json()["choices"][0]["message"]["content"].strip()
             clean = remove_emojis_and_glitches(raw)
-            if len(clean) >= 200:
+            if len(clean) >= 180:
+                # Pastikan link tidak tertinggal
+                if clean_aff_link and clean_aff_link not in clean:
+                    clean = f"{clean}\n\nPautan Rasmi: {clean_aff_link}"
                 return clean
     except Exception as e:
         print(f"⚠️ [IG REEL AI WARN] {e}")
@@ -592,7 +596,7 @@ def run_affiliate_reel_job():
         print("❌ [ABORT] Gagal menjana fail video Reel produk.")
         return
 
-    # 5. AI Persona Jana Kapsyen Berasingan bagi Setiap Platform
+    # 5. AI Persona Jana Kapsyen Berasingan bagi Setiap Platform (Termasuk Pautan Affiliate di IG Reel)
     print("\n✍️ [STEP 4] Menjana kapsyen tersuai bagi setiap platform (Zero-Emoji)...")
     fb_caption = generate_fb_reel_caption(
         base_url=base_url,
@@ -611,6 +615,7 @@ def run_affiliate_reel_job():
         title=title,
         category=category,
         price=price,
+        aff_link=aff_link,
     )
 
     threads_caption = generate_threads_video_caption(
