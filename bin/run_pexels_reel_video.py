@@ -3,9 +3,9 @@
 Master Execution Runner for Pexels 9:16 Video Reels (Facebook, Instagram & Threads)
 Sembang PC & Tech Ecosystem (2x Daily)
 Optimized Execution Flow:
-1. Detect Malaysian Time Slot & Load 5 Recent Memories from Redis.
-2. AI Generates 10 Candidates -> Filters via Redis 5-Day & Vector DB 5-Day Guardrails -> 1 Keyword Selected.
-3. 1 API Call to Pexels (per_page=20) -> Strict Faceless Filter -> Redis 30-Day Duplicate Filtering -> Pick 3 Clips.
+1. Detect Malaysian Time Slot & Load 5 Recent Caption Memories from Redis.
+2. AI Generates Candidate Keywords with 20-Keyword Redis Memory Bank Ingestion & Semantic Guardrails.
+3. Multi-Candidate Retry Loop: Search Pexels (per_page=70) -> Faceless Filter -> Pick 3 Clips -> Commit Keyword.
 4. [RENDER DAHULU] MoviePy stitches 3 clips (21-24s, 1080x1920) + local audio from assets/music/ (with Smart Metadata).
 5. [AI JANA AYAT SELEPAS RENDER] AI Persona generates caption with full video & music metadata (Title, Artist, Genre, Vibe).
 6. Vector DB checks caption semantic similarity (5-day window) with auto-retry loop.
@@ -35,7 +35,7 @@ else:
 
 # Import Modules
 from src.pexels_ai_persona import pexels_ai, detect_reel_time_slot
-from src.pexels_keyword_engine import get_fresh_pexels_reel_keyword
+from src.pexels_keyword_engine import get_fresh_pexels_reel_keyword_candidates, commit_reel_keyword
 from src.pexels_reel_bot import fetch_and_filter_pexels_videos, render_stitched_reel_video, upload_reel_to_facebook
 from src.pexels_reel_bot_instagram import instagram_reel_bot
 from src.pexels_reel_bot_threads import threads_reel_bot
@@ -116,9 +116,9 @@ def run_pexels_reel_video_job():
     previous_memories = get_reel_story_memories(redis_url, redis_token, limit=5)
     print(f"  ✅ {len(previous_memories)} ingatan Reels lepas berjaya dimuatkan.")
 
-    # 4. Jana & Tapis Kata Kunci Segar Bebas Muka (Redis 5-Hari & Vector 5-Hari)
-    print("\n💡 [STEP 2] Enjin Kata Kunci meneliti & menapis kata kunci video segar (Faceless B-Roll)...")
-    query_keyword = get_fresh_pexels_reel_keyword(
+    # 4. Jana Senarai Calon Kata Kunci Segar Bebas Muka
+    print("\n💡 [STEP 2] Enjin Kata Kunci meneliti & menapis calon kata kunci video segar (Faceless B-Roll)...")
+    candidate_keywords = get_fresh_pexels_reel_keyword_candidates(
         base_url=base_url,
         model=model,
         api_key=api_key,
@@ -128,19 +128,38 @@ def run_pexels_reel_video_job():
         vector_token=vector_token,
     )
 
-    # 5. Tarik 20 Video Pexels (1 API Call) & Tapis Muka + Penjara 30-Hari Redis
-    print("\n🌐 [STEP 3] Menghantar 1 API Call ke Pexels untuk 20 video vertikal (9:16)...")
-    selected_videos, _ = fetch_and_filter_pexels_videos(
-        api_key=pexels_key,
-        redis_url=redis_url,
-        redis_token=redis_token,
-        query=query_keyword,
-        needed_count=3,
-        batch_size=20,
-    )
+    if not candidate_keywords:
+        print("❌ [ABORT] Tiada calon kata kunci yang lulus tapisan.")
+        return
 
-    if len(selected_videos) < 3:
-        print("❌ [ABORT] Calon video 9:16 bersih tidak mencukupi (Minimum 3 video diperlukan).")
+    # 5. Gelung Carian Video Pexels (per_page=70) Merentasi Calon Kata Kunci
+    print("\n🌐 [STEP 3] Memulakan Gelung Carian Video Pexels (per_page=70) merentasi calon kata kunci...")
+    selected_videos = []
+    selected_keyword = None
+
+    for attempt_idx, kw in enumerate(candidate_keywords, start=1):
+        print(f"\n  🎯 [PERCUBAAN {attempt_idx}/{len(candidate_keywords)}] Menguji kata kunci: '{kw}'...")
+        videos, _ = fetch_and_filter_pexels_videos(
+            api_key=pexels_key,
+            redis_url=redis_url,
+            redis_token=redis_token,
+            query=kw,
+            needed_count=3,
+            batch_size=70,
+        )
+
+        if len(videos) >= 3:
+            selected_videos = videos[:3]
+            selected_keyword = kw
+            print(f"  🎉 [BERJAYA] Kata kunci '{kw}' berjaya memperoleh 3 klip video vertikal bebas muka!")
+            # Kunci kata kunci yang disahkan berjaya
+            commit_reel_keyword(redis_url, redis_token, vector_url, vector_token, kw)
+            break
+        else:
+            print(f"  ⚠️ [TIDAK MENCUKUPI] Kata kunci '{kw}' hanya memperoleh {len(videos)} video bersih. Beralih ke calon seterusnya...")
+
+    if len(selected_videos) < 3 or not selected_keyword:
+        print("\n❌ [ABORT] Kesemua calon kata kunci gagal memperoleh 3 klip video vertikal bersih.")
         return
 
     video_ids = [v["id"] for v in selected_videos]
@@ -162,9 +181,9 @@ def run_pexels_reel_video_job():
     music_audit_label = f"{music_title_display} ({music_artist_display})" if music_artist_display else music_title_display
 
     # 7. [AI JANA AYAT SELEPAS RENDER] AI Menjana Kapsyen Berdasarkan Video Siap + Metadata Muzik Penuh
-    print(f"\n✍️ [STEP 5] [AI JANA AYAT] Menjana penceritaan Reels berjiwa (Visual: '{query_keyword}', Muzik: '{music_audit_label}', Durasi: {video_duration}s)...")
+    print(f"\n✍️ [STEP 5] [AI JANA AYAT] Menjana penceritaan Reels berjiwa (Visual: '{selected_keyword}', Muzik: '{music_audit_label}', Durasi: {video_duration}s)...")
     caption_text = pexels_ai.generate_reel_caption(
-        topic_keyword=query_keyword,
+        topic_keyword=selected_keyword,
         music_info=music_info,
         video_duration=video_duration,
         previous_memories=previous_memories,
@@ -174,7 +193,7 @@ def run_pexels_reel_video_job():
     if is_similar_reel_story_posted(vector_url, vector_token, caption_text):
         print("⚠️ [PEXELS REEL VECTOR] Topik kapsyen serupa dikesan (< 5 hari lepas). Menjana alternatif...")
         caption_text = pexels_ai.generate_reel_caption(
-            topic_keyword=query_keyword,
+            topic_keyword=selected_keyword,
             music_info=music_info,
             video_duration=video_duration,
             previous_memories=previous_memories,
@@ -234,7 +253,7 @@ def run_pexels_reel_video_job():
                         caption=caption_text,
                         image_url="",
                         permalink=ig_permalink,
-                        post_type=f"Pexels Reel ({query_keyword}) | Audio: {music_audit_label}",
+                        post_type=f"Pexels Reel ({selected_keyword}) | Audio: {music_audit_label}",
                     )
             else:
                 print(f"  ⚠️ [IG REEL FAILED] {res_ig.get('error')}")
@@ -260,7 +279,7 @@ def run_pexels_reel_video_job():
                         caption=caption_text,
                         image_url="",
                         permalink=th_permalink,
-                        post_type=f"Threads Video ({query_keyword}) | Audio: {music_audit_label}",
+                        post_type=f"Threads Video ({selected_keyword}) | Audio: {music_audit_label}",
                     )
             else:
                 print(f"  ⚠️ [THREADS VIDEO FAILED] {res_th.get('error')}")
@@ -277,7 +296,7 @@ def run_pexels_reel_video_job():
             save_reel_story_memory(redis_url, redis_token, caption_text, max_memories=10)
 
             # Simpan Vector Embedding Kapsyen ke Vector DB (Window 5 Hari)
-            primary_story_id = f"{video_ids[0]}_{query_keyword.replace(' ', '_')}"
+            primary_story_id = f"{video_ids[0]}_{selected_keyword.replace(' ', '_')}"
             mark_reel_story_vector_posted(vector_url, vector_token, primary_story_id, caption_text)
 
             print("\n🎉 [SUCCESS] Seluruh aliran Video (Render Dahulu ➔ Ayat AI ➔ Multi-Post) selesai dengan jayanya!\n")

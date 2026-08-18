@@ -29,7 +29,7 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests python-dotenv moviepy
+          pip install -r requirements.txt
 
       - name: Run Pexels Reels & Threads Video Engine
         env:

@@ -3,7 +3,7 @@
 Dedicated Facebook Pexels Video Reels Engine
 Sembang PC & Tech Ecosystem
 Features:
-- 1-API Call Pexels Batch Fetch (20 Videos) & Redis 30-Day Duplicate Filtering
+- 1-API Call Pexels Batch Fetch (70 Videos) & Redis 30-Day Duplicate Filtering
 - Comprehensive Facial & Sensitive Filter (Rejects all human faces, gamers, streamers, selfies)
 - High-Performance MoviePy 9:16 Stitching (1080x1920, H.264/AAC, 21-24 Saat)
 - Smart Audio Metadata & ID3 Ingestion (Extracts Clean Title, Artist, Genre & Vibe)
@@ -72,9 +72,9 @@ def fetch_and_filter_pexels_videos(
     redis_token: str,
     query: str,
     needed_count: int = 3,
-    batch_size: int = 20,
+    batch_size: int = 70,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Menghantar 1 permintaan API ke Pexels (per_page=20) dan menapis kandungan selamat serta segar."""
+    """Menghantar 1 permintaan API ke Pexels (per_page=70) dan menapis kandungan selamat serta segar."""
     print(f"\n📡 [PEXELS API] Menghantar 1 request (per_page={batch_size}) carian video: '{query}'...")
 
     if not api_key:
@@ -194,9 +194,7 @@ def extract_smart_audio_metadata(song_path: str, filename: str) -> Dict[str, str
     """Mengekstrak metadata audio dengan menapis ID berangka Meta dan membersihkan nama fail."""
     base_name = os.path.splitext(filename)[0]
     
-    # 1. Bersihkan nama fail menjadi tajuk lagu yang kemas
     clean_title_from_file = re.sub(r'[_\-]+', ' ', base_name).strip()
-    # Buang perkataan sampingan seperti '30s', 'Loop', 'Instrumental' untuk teks yang lebih kemas
     clean_title_from_file = re.sub(r'\b(30s|loop|instrumental|reels sound|before after)\b', '', clean_title_from_file, flags=re.I)
     clean_title_from_file = re.sub(r'\s+', ' ', clean_title_from_file).strip().title()
 
@@ -204,13 +202,11 @@ def extract_smart_audio_metadata(song_path: str, filename: str) -> Dict[str, str
     artist = ""
     genre = ""
 
-    # 2. Cuba baca tag ID3 (jika ada)
     if MutagenFile:
         try:
             audio_tag = MutagenFile(song_path)
             if audio_tag and hasattr(audio_tag, "get"):
                 raw_nam = str(audio_tag.get("\xa9nam", [""])[0] if isinstance(audio_tag.get("\xa9nam"), list) else audio_tag.get("\xa9nam", ""))
-                # Jika tag title bukan sekadar nombor ID Meta, gunakannya
                 if raw_nam and not raw_nam.strip().isdigit():
                     title = raw_nam.strip()
 
@@ -220,7 +216,6 @@ def extract_smart_audio_metadata(song_path: str, filename: str) -> Dict[str, str
         except Exception:
             pass
 
-    # 3. Gunakan tajuk dari nama fail jika tag kosong atau mengandungi nombor ID sahaja
     if not title or title.isdigit():
         title = clean_title_from_file or "Original Audio"
 
@@ -287,7 +282,6 @@ def render_stitched_reel_video(
     """
     Mencantumkan 3 klip video menjadi 1 video Reel vertikal (1080x1920, 21–24 saat)
     berserta trek audio AAC berkualiti tinggi.
-    Memulangkan: (output_video_path, music_info_dict, total_duration)
     """
     print(f"\n🎬 [MOVIEPY] Memulakan proses cantuman {len(video_items)} klip video...")
     downloaded_paths = []

@@ -6,6 +6,7 @@ Features:
 - Video ID Deduplication (TTL 30 Hari / 2,592,000s)
 - Keyword Exact Match Deduplication (TTL 5 Hari / 432,000s)
 - Reel Story/Caption Bank Memory (LPUSH + LTRIM 10 Terkini)
+- Reel Keyword History Memory Bank (LPUSH + LTRIM 20 Terkini)
 """
 
 import os
@@ -18,6 +19,7 @@ from typing import List, Optional
 VIDEO_ID_TTL_SECONDS = 30 * 86400   # 30 Hari (2,592,000 saat)
 KEYWORD_TTL_SECONDS = 5 * 86400      # 5 Hari (432,000 saat)
 REDIS_MEMORY_KEY = "pexels_reel:memory:recent_stories"
+REDIS_KEYWORD_MEMORY_KEY = "pexels_reel:memory:recent_keywords"
 
 
 # -----------------------------------------------------------------------------
@@ -171,5 +173,59 @@ def save_reel_story_memory(redis_url: str, redis_token: str, story_text: str, ma
             return True
     except Exception as e:
         print(f"⚠️ [Pexels Reel Memory Save Warn]: {e}")
+
+    return False
+
+
+# -----------------------------------------------------------------------------
+# 4. BANK INGATAN SEJARAH KATA KUNCI (20 KATA KUNCI TERKINI)
+# -----------------------------------------------------------------------------
+
+def get_recent_reel_keywords(redis_url: str, redis_token: str, limit: int = 20) -> List[str]:
+    """
+    Mengambil 'limit' (default 20) kata kunci Reel terakhir daripada Redis
+    untuk dijadikan rujukan konteks prompt AI Generator agar tidak mengulang tema sama.
+    """
+    if not redis_url or not redis_token:
+        return []
+
+    clean_url = redis_url.rstrip("/")
+    headers = {"Authorization": f"Bearer {redis_token}", "Content-Type": "application/json"}
+    payload = ["LRANGE", REDIS_KEYWORD_MEMORY_KEY, "0", str(limit - 1)]
+
+    try:
+        res = requests.post(f"{clean_url}/", json=payload, headers=headers, timeout=10)
+        if res.status_code == 200:
+            result = res.json().get("result", [])
+            if isinstance(result, list):
+                return [str(item) for item in result if item]
+    except Exception as e:
+        print(f"⚠️ [Pexels Reel Keyword Memory Read Warn]: {e}")
+
+    return []
+
+
+def save_reel_keyword_memory(redis_url: str, redis_token: str, keyword: str, max_keywords: int = 20) -> bool:
+    """
+    Simpan kata kunci Reel baharu ke dalam senarai ingatan Redis (LPUSH)
+    dan kekalkan maksimum 20 kata kunci terkini sahaja (LTRIM).
+    """
+    if not redis_url or not redis_token or not keyword:
+        return False
+
+    clean_url = redis_url.rstrip("/")
+    headers = {"Authorization": f"Bearer {redis_token}", "Content-Type": "application/json"}
+    pipeline_payload = [
+        ["LPUSH", REDIS_KEYWORD_MEMORY_KEY, str(keyword).strip()],
+        ["LTRIM", REDIS_KEYWORD_MEMORY_KEY, "0", str(max_keywords - 1)],
+    ]
+
+    try:
+        res = requests.post(f"{clean_url}/pipeline", json=pipeline_payload, headers=headers, timeout=10)
+        if res.status_code == 200:
+            print(f"🧠 [PEXELS KEYWORD REDIS] Kata kunci '{keyword}' disimpan ke Bank Ingatan (Kekal {max_keywords} terkini).")
+            return True
+    except Exception as e:
+        print(f"⚠️ [Pexels Reel Keyword Memory Save Warn]: {e}")
 
     return False
