@@ -24,7 +24,7 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas openpyxl requests python-dotenv
+          pip install -r requirements.txt
 
       - name: Run Auto Posting Engine
         env:
