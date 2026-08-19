@@ -1,12 +1,9 @@
 name: 🟠 Shopee Social Media Feed Auto-Poster
 
 on:
-  schedule:
-    # 07:30 AM, 12:30 PM, 05:30 PM, 09:30 PM (Waktu Malaysia - MYT / UTC+8)
-    - cron: '30 23 * * *'   # 07:30 AM MYT (11:30 PM UTC hari sebelumnya)
-    - cron: '30 4 * * *'    # 12:30 PM MYT (04:30 AM UTC)
-    - cron: '30 9 * * *'    # 05:30 PM MYT (09:30 AM UTC)
-    - cron: '30 13 * * *'   # 09:30 PM MYT (01:30 PM UTC)
+#  schedule:
+    # 07:10 AM, 12:10 PM, 05:10 PM, 09:10 PM (Waktu Malaysia - MYT / UTC+8)
+#    - cron: '10 4,9,13,23 * * *'   # 07:30 AM MYT (11:30 PM UTC hari sebelumnya)
   workflow_dispatch:        # Butang manual trigger dari tab Actions di GitHub
 
 jobs:
