@@ -221,5 +221,6 @@ __marimo__/
 ### MY PROJECT FILES
 .env.local
 .env.gh.secret
+.env.gh.example
 .env.example
 .archive/

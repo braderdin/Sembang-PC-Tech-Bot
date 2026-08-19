@@ -109,19 +109,24 @@ def parse_bluesky_facets(text: str):
     Mengekstrak pautan URL dan tanda pagar (#hashtag)
     serta mengira kedudukan indeks bait UTF-8 untuk pautan boleh klik di Bluesky.
     """
+    if not text:
+        return []
+
     facets = []
-    text_bytes = text.encode("utf-8")
 
     # 1. Ekstrak URLs (Pautan Web / Shopee)
-    url_pattern = re.compile(rb'https?://[^\s<>"]+|www\.[^\s<>"]+')
-    for match in url_pattern.finditer(text_bytes):
-        url_bytes = match.group(0)
-        raw_url = url_bytes.decode("utf-8")
+    url_pattern = re.compile(r'https?://[^\s<>"]+|www\.[^\s<>"]+')
+    for match in url_pattern.finditer(text):
+        raw_url = match.group(0)
         full_url = raw_url if raw_url.startswith("http") else f"https://{raw_url}"
+        
+        start_byte = len(text[:match.start()].encode("utf-8"))
+        end_byte = len(text[:match.end()].encode("utf-8"))
+
         facets.append({
             "index": {
-                "byteStart": match.start(),
-                "byteEnd": match.end()
+                "byteStart": start_byte,
+                "byteEnd": end_byte
             },
             "features": [{
                 "$type": "app.bsky.richtext.facet#link",
@@ -130,13 +135,17 @@ def parse_bluesky_facets(text: str):
         })
 
     # 2. Ekstrak Hashtags (#tag)
-    tag_pattern = re.compile(rb'#([a-zA-Z0-9_\u00C0-\u024F]+)')
-    for match in tag_pattern.finditer(text_bytes):
-        tag_text = match.group(1).decode("utf-8")
+    tag_pattern = re.compile(r'#([a-zA-Z0-9_\u00C0-\u024F]+)')
+    for match in tag_pattern.finditer(text):
+        tag_text = match.group(1)
+        
+        start_byte = len(text[:match.start()].encode("utf-8"))
+        end_byte = len(text[:match.end()].encode("utf-8"))
+
         facets.append({
             "index": {
-                "byteStart": match.start(),
-                "byteEnd": match.end()
+                "byteStart": start_byte,
+                "byteEnd": end_byte
             },
             "features": [{
                 "$type": "app.bsky.richtext.facet#tag",

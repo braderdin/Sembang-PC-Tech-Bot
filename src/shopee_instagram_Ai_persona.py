@@ -13,26 +13,21 @@ MALAY_ANCHOR_WORDS = {
 
 SYSTEM_PROMPT = """
 Anda ialah Penulis Kandungan Rasmi untuk Instagram & Pinterest "Sembang PC & Tech Malaysia".
-Hantaran ini akan disegerakkan secara automatik dari Instagram terus ke papan Pinterest.
+Tugas anda HANYA menulis ulasan padat produk (Hook Pembuka & 2 Poin Kelebihan Sahaja).
 
-STRUKTUR WAJIB KAPSYEN (ZON EMAS PINTEREST: 350 HINGGA 450 AKSARA):
-1. Fasa 1 (Tajuk Produk & Hook Pantas - 2 Baris Awal untuk Pinterest SEO):
-   - Nyatakan nama produk dengan jelas dan kemas di baris pertama/kedua.
-2. Fasa 2 (Ulasan Ringkas & 2 Poin Kelebihan):
-   - Senaraikan tepat 2 kelebihan utama menggunakan simbol bullet point (•).
-3. Fasa 3 (Call To Action Dwi-Fungsi Pinterest & Instagram Bio - WAJIB):
-   - Letakkan pautan belian rasmi Shopee:
-     "🔗 Pautan Rasmi: <affiliate_link>"
-   - Tambah panduan carian Bio & Telegram (DILARANG letak simbol '@' sebelum nama bot):
-     "👉 Atau tekan link di Bio & taip \"<kata_kunci>\" di Telegram Bot: lubuk_barang_murah_padu_bot"
-4. Fasa 4 (Hashtags Rasmi):
-   - #RacunGajet #SembangPCTech #ShopeeMY #PCSetup #TechMalaysia
+STRUKTUR TEKS YANG DIMINTA (ZON PADAT: 150 HINGGA 200 AKSARA):
+1. Baris 1-2 (Hook & Nama Produk):
+   - Nyatakan nama produk / jenama dengan jelas dan menarik di awal ayat (contoh: "UGREEN USB-C Fast Charging Cable! Upgrade setup kabel korang...").
+   - DILARANG SAMA SEKALI guna frasa generik seperti "Gajet Pilihan:".
+2. Baris 3-4 (Tepat 2 Kelebihan Utama):
+   - Senaraikan TEPAT 2 poin kelebihan utama produk menggunakan simbol bullet point (•).
 
-PANDUAN KETAT:
-- WAJIB kekalkan panjang keseluruhan teks di antara 350 HINGGA 450 AKSARA (agar teks tidak terpotong di Pinterest).
-- DILARANG letak simbol '@' pada perkataan nama bot Telegram.
-- DILARANG gunakan bahasa kaku atau Bahasa Indonesia.
-- TERUS TULIS AYAT KANDUNGAN TANPA sebarang mukadimah AI.
+PANTANGAN SANGAT KETAT:
+- DILARANG letak sebarang pautan (URL/Link). Pautan rasmi akan dipasang secara automatik oleh sistem.
+- DILARANG letak arahan Telegram, CTA bio, atau pautan bot.
+- DILARANG letak sebarang tanda pagar (#hashtag).
+- DILARANG guna bahasa kaku atau perkataan Indonesia (bisa, banget, dll).
+- TERUS TULIS AYAT ULASAN & 2 POIN BULLET SAHAJA tanpa sebarang mukadimah AI.
 """
 
 
@@ -58,45 +53,67 @@ def clean_glitches_and_meta_chatter(text: str) -> str:
     text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption)[^\n]*?\n+', '', text)
     text = re.sub(r'(?i)\*\*caption\s*(?:instagram)?\s*:\*\*', '', text)
 
-    # 5. Buang bahagian tips tambahan di penghujung teks
-    text = re.sub(r'(?i)\n+\s*\*{0,2}tips\s*tambahan[^\n]*\*{0,2}[\s\S]*$', '', text)
-    text = re.sub(r'\*\*\*', '', text)
+    # 5. Buang sebarang frasa generik 'Gajet Pilihan:'
+    text = re.sub(r'(?i)🎧?\s*gajet\s*pilihan\s*:\s*', '', text)
 
-    # 6. Susun baris perenggan yang kemas
+    # 6. Buang pautan, CTA telegram atau hashtag jika AI terlepas pandang
+    text = re.sub(r'https?://[^\s]+', '', text)
+    text = re.sub(r'(?i)👉\s*Atau\s*tekan\s*link[^\n]*', '', text)
+    text = re.sub(r'#[a-zA-Z0-9_\u00C0-\u024F]+', '', text)
+
+    # 7. Susun baris perenggan yang kemas
     lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
     return "\n".join([line for line in lines if line]).strip()
 
 
 def extract_search_keyword(title: str, max_words: int = 3) -> str:
     """
-    Mengekstrak 2-3 kata kunci penting daripada tajuk produk untuk Telegram Catalog Bot.
+    Mengekstrak 2-3 perkataan berturutan yang paling relevan daripada tajuk produk
+    untuk carian 'ilike' yang 100% tepat di Supabase Telegram Catalog Bot.
     """
     if not title:
-        return "Gajet"
+        return "Gajet Pilihan"
 
-    clean = re.sub(r'[\[\]\(\)\#\|\/\-\+\:\,\.]', ' ', str(title))
-    words = [w.strip() for w in clean.split() if len(w.strip()) > 1 and not w.strip().isdigit()]
+    # Buang kurungan di hadapan seperti [NEW], 【Nexode】, dll
+    clean = re.sub(r'^[\[【][^\]】]*[\]】]\s*', '', str(title))
+    clean = re.sub(r'[\[\]\(\)\#\|\:\,\.【】\+]', ' ', clean)
+    clean = re.sub(r'\s+', ' ', clean).strip()
 
     stop_words = {
         'original', 'ready', 'stock', 'new', 'pro', 'set', 'hot', 'offer',
-        'murah', 'padu', 'high', 'quality', 'fast', 'delivery', 'warranty', 'shopee'
+        'murah', 'padu', 'high', 'quality', 'fast', 'delivery', 'warranty',
+        'compatible', 'for', 'system', 'free', 'shipping', 'flagship', 'store',
+        'official', 'and', 'with', 'from', 'best', 'sale', 'promo', 'shopee', 'lazada'
     }
 
-    filtered = []
+    words = clean.split(' ')
+    selected = []
+
     for w in words:
-        if w.lower() not in stop_words or len(filtered) == 0:
-            filtered.append(w)
-        if len(filtered) >= max_words:
+        w_clean = w.strip()
+        if not w_clean or len(w_clean) < 2:
+            continue
+        if w_clean.lower() in stop_words:
+            if not selected:
+                continue
+            else:
+                break  # Hentikan pengekstrakan untuk mengekalkan frasa berturutan
+        selected.append(w_clean)
+        if len(selected) >= max_words:
             break
 
-    return " ".join(filtered) if filtered else str(title)[:15]
+    if selected:
+        return " ".join(selected)
+
+    fallback_words = [w for w in words if len(w) > 1][:max_words]
+    return " ".join(fallback_words) if fallback_words else str(title)[:20].strip()
 
 
-def is_valid_ig_caption(text: str) -> bool:
+def is_valid_ig_body(text: str) -> bool:
     """
-    Menyemak kualiti teks bagi mengelakkan ayat rosak atau token berulang.
+    Menyemak kualiti teks ulasan AI sebelum digabungkan dengan komponen footer.
     """
-    if not text or len(text.strip()) < 80:
+    if not text or len(text.strip()) < 50:
         return False
     if "<pad>" in text.lower() or "<unk>" in text.lower():
         return False
@@ -106,7 +123,7 @@ def is_valid_ig_caption(text: str) -> bool:
         return False
 
     words = [w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', text)]
-    if len(words) < 15:
+    if len(words) < 8:
         return False
 
     unique_words = set(words)
@@ -131,33 +148,53 @@ class ShopeeInstagramAIPersona:
     def generate_caption(self, product_data: Dict[str, Any]) -> Tuple[bool, str]:
         """
         Menjana kapsyen Instagram Feed & Pinterest Sync (350 - 450 Aksara)
-        mengandungi pautan affiliate terus dan CTA bot carian Telegram.
+        dengan jaminan sifar pautan bertindih dan kata kunci carian Telegram yang tepat.
         Memulangkan: (success_bool, caption_text)
         """
-        raw_title = str(product_data.get("shopee_product_name") or product_data.get("title") or "Gajet Pilihan").strip()
+        # Menyokong pelbagai format kunci data secara seragam
+        raw_title = str(
+            product_data.get("product_name")
+            or product_data.get("shopee_product_name")
+            or product_data.get("title")
+            or "Aksesori Komputer"
+        ).strip()
+
         clean_title = re.sub(r'\s+', ' ', raw_title)[:65].strip()
-        price = product_data.get("shopee_price") or product_data.get("price") or ""
-        category = product_data.get("shopee_category") or product_data.get("category") or "Aksesori PC & Gajet"
-        aff_link = str(product_data.get("shopee_affiliate_link") or product_data.get("affiliate_link") or "").strip()
+        brand = str(product_data.get("brand") or product_data.get("shopee_brand") or "Pilihan Ramai").strip()
+        price = product_data.get("price") or product_data.get("shopee_price") or ""
+        category = product_data.get("category") or product_data.get("shopee_category") or "Aksesori PC & Gajet"
+        aff_link = str(
+            product_data.get("affiliate_link")
+            or product_data.get("shopee_affiliate_link")
+            or product_data.get("promo_short_link")
+            or ""
+        ).strip()
+
+        # Ekstrak kata kunci carian berturutan (contoh: "UGREEN USB-A USB-C" atau "UGREEN Car Phone")
         search_kw = extract_search_keyword(raw_title)
 
         price_str = f"RM {float(price):.2f}" if price and str(price).replace('.', '', 1).isdigit() else ""
-        price_display = f"\n💰 Tawaran: {price_str}" if price_str else ""
+        price_info = f" ({price_str})" if price_str else ""
 
-        # Kapsyen sandaran jika OpenRouter gagal
-        fallback_caption = (
-            f"Korang yang tengah nak upgrade setup meja, tengok yang ni! ⚡\n\n"
-            f"📦 {clean_title}{price_display}\n\n"
-            f"• Kualiti binaan kemas & sangat praktikal\n"
-            f"• Nilai berbaloi untuk ruang kerja selesa\n\n"
-            f"🔗 Pautan Rasmi: {aff_link}\n"
-            f"👉 Atau tekan link di Bio & taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot\n\n"
-            f"#RacunGajet #SembangPCTech #ShopeeMY #PCSetup #TechMalaysia"
+        # 1. BINA FOOTER PROGRAMATIK (Pautan Rasmi & CTA Telegram Dijamin Selamat)
+        link_line = f"🔗 Pautan Rasmi: {aff_link}" if aff_link else ""
+        cta_telegram = f"👉 Atau tekan link di Bio & taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot"
+        hashtags = "#RacunGajet #BarangMurahPadu #SembangPCTech #TechMalaysia #PCSetup #ShopeeMY"
+
+        footer_elements = [el for el in [link_line, cta_telegram, hashtags] if el]
+        footer_block = "\n".join(footer_elements)
+
+        # 2. AYAT SANDARAN BADAN JIKA AI GAGAL
+        fallback_body = (
+            f"{clean_title}! Upgrade setup meja atau ruang kerja korang dengan pilihan mantap daripada {brand}{price_info}.\n\n"
+            f"• Kualiti binaan kemas & tahan lasak untuk kegunaan harian\n"
+            f"• Rekaan praktikal yang sangat memudahkan urusan kerja dan santai"
         )
 
         if not self.base_url or not self.model or not self.api_key:
             print("⚠️ [IG AI WARN] Kunci OpenRouter tidak lengkap, menggunakan kapsyen sandaran.")
-            return True, fallback_caption
+            full_fallback = f"{fallback_body}\n\n{footer_block}".strip()
+            return True, full_fallback
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -167,14 +204,13 @@ class ShopeeInstagramAIPersona:
         }
 
         user_prompt = f"""
-Sila hasilkan kapsyen lengkap Instagram & Pinterest (350 - 450 aksara) untuk produk ini:
-Produk: {clean_title}
-Kategori: {category}
-Harga: {price_str if price_str else 'Promosi Berbaloi'}
-Pautan Affiliate: {aff_link}
-Kata Kunci Carian: {search_kw}
+Sila hasilkan ulasan padat (Hook + 2 Poin Bullets sahaja) untuk produk ini:
+- Produk: {clean_title}
+- Jenama: {brand}
+- Kategori: {category}
+- Harga: {price_str if price_str else 'Promosi Berbaloi'}
 
-Tuliskan teks lengkap sekarang:
+Peringatan: JANGAN letak sebarang link, hashtag, atau CTA Telegram. Tulis teks ulasan dan 2 poin bullet sahaja.
 """
 
         payload = {
@@ -184,7 +220,7 @@ Tuliskan teks lengkap sekarang:
                 {"role": "user", "content": user_prompt.strip()},
             ],
             "temperature": 0.65,
-            "max_tokens": 450,
+            "max_tokens": 250,
             "frequency_penalty": 0.3,
             "presence_penalty": 0.1,
         }
@@ -194,7 +230,7 @@ Tuliskan teks lengkap sekarang:
         # Mekanisme 3x Percubaan (Retry)
         for attempt in range(3):
             try:
-                print(f"🤖 [IG AI GENERATION] Menjana kapsyen Instagram (Percubaan {attempt + 1}/3)...")
+                print(f"🤖 [IG AI GENERATION] Menjana ulasan Instagram (Percubaan {attempt + 1}/3)...")
                 res = requests.post(url, headers=headers, json=payload, timeout=25)
                 res.encoding = "utf-8"
 
@@ -202,14 +238,15 @@ Tuliskan teks lengkap sekarang:
                     data = res.json()
                     if "choices" in data and len(data["choices"]) > 0:
                         raw_text = data["choices"][0]["message"]["content"].strip()
-                        cleaned_text = clean_glitches_and_meta_chatter(raw_text)
+                        cleaned_body = clean_glitches_and_meta_chatter(raw_text)
 
-                        # Pastikan pautan affiliate dan CTA bot ada di dalam teks
-                        if is_valid_ig_caption(cleaned_text) and (aff_link in cleaned_text or not aff_link):
-                            print(f"✅ [IG AI SUCCESS] Kapsyen Instagram berjaya dijana ({len(cleaned_text)} aksara).")
-                            return True, cleaned_text
+                        if is_valid_ig_body(cleaned_body):
+                            # Gabungkan ulasan AI bersama Footer Programatik
+                            final_caption = f"{cleaned_body}\n\n{footer_block}".strip()
+                            print(f"✅ [IG AI SUCCESS] Kapsyen Instagram berjaya dijana ({len(final_caption)} aksara | Kata Kunci: '{search_kw}').")
+                            return True, final_caption
                         else:
-                            print(f"⚠️ [IG AI GLITCH] Teks tidak menepati format/kualiti pada percubaan {attempt + 1}. Mencuba semula...")
+                            print(f"⚠️ [IG AI GLITCH] Teks tidak menepati kualiti pada percubaan {attempt + 1}. Mencuba semula...")
                 else:
                     print(f"⚠️ [IG AI HTTP ERROR] HTTP {res.status_code}: {res.text}")
 
@@ -217,7 +254,8 @@ Tuliskan teks lengkap sekarang:
                 print(f"⚠️ [IG AI EXCEPTION - ATTEMPT {attempt + 1}]: {str(e)}")
 
         print("🛡️ [IG AI FALLBACK] Mengaktifkan kapsyen Instagram sandaran bersih.")
-        return True, fallback_caption
+        full_fallback = f"{fallback_body}\n\n{footer_block}".strip()
+        return True, full_fallback
 
 
 # Singleton instance untuk kegunaan modular

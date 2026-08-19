@@ -6,9 +6,10 @@ Workflow Runner:
 2. Create Instagram Single-Photo Media Container via Meta Graph API.
 3. Wait for Media Container status to become FINISHED.
 4. Publish container to Instagram Professional Profile Feed.
-5. Retrieve Instagram Post Permalink for verification.
-6. Output 'POST ID :' and Permalink for GitHub Actions tracking.
-7. Update 'post_results.instagram' inside 'temp/shopee_payload.json'.
+5. Self-Healing Verification: Auto-detect published post if Meta returns transient rate-limit warning.
+6. Retrieve Instagram Post Permalink for verification.
+7. Output 'POST ID :' and Permalink for GitHub Actions tracking.
+8. Update 'post_results.instagram' inside 'temp/shopee_payload.json'.
 """
 
 import os
@@ -31,8 +32,7 @@ else:
     load_dotenv()
 
 PAYLOAD_FILE = PROJECT_ROOT / "temp" / "shopee_payload.json"
-GRAPH_API_VERSION = "v26.0"
-GRAPH_BASE_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
+GRAPH_BASE_URL = "https://graph.facebook.com/v19.0"
 
 
 def get_instagram_credentials():
@@ -46,10 +46,11 @@ def get_instagram_credentials():
     return account_id, access_token
 
 
-def wait_for_container_ready(creation_id: str, access_token: str, timeout: int = 25) -> bool:
+def wait_for_container_ready(creation_id: str, access_token: str, timeout: int = 30) -> str:
     """
     Menunggu sehingga Meta selesai memproses dan mengoptimumkan imej
     di pelayan CDN sebelum membenarkan penerbitan container.
+    Memulangkan status akhir: 'FINISHED', 'PUBLISHED', atau 'ERROR'.
     """
     url = f"{GRAPH_BASE_URL}/{creation_id}"
     params = {"fields": "status_code", "access_token": access_token}
@@ -62,14 +63,14 @@ def wait_for_container_ready(creation_id: str, access_token: str, timeout: int =
             if res.status_code == 200:
                 status = res.json().get("status_code", "").upper()
                 if status in ["FINISHED", "PUBLISHED"]:
-                    return True
+                    return status
                 elif status in ["ERROR", "EXPIRED"]:
                     print(f"⚠️ [IG CONTAINER ERROR] Status Container: {status}")
-                    return False
+                    return status
         except Exception:
             pass
 
-    return True
+    return "FINISHED"
 
 
 def get_instagram_permalink(media_id: str, access_token: str) -> str:
@@ -85,9 +86,40 @@ def get_instagram_permalink(media_id: str, access_token: str) -> str:
     return f"https://www.instagram.com/p/{media_id}/"
 
 
+def check_recent_published_post(account_id: str, access_token: str, match_caption: str):
+    """
+    Enjin Pengesanan Kendiri (Self-Healing Recovery):
+    Menyemak 3 media terkini di akaun Instagram untuk memastikan sama ada
+    hantaran telah berjaya diterbitkan sekiranya Meta API mengembalikan ralat transient.
+    """
+    url = f"{GRAPH_BASE_URL}/{account_id}/media"
+    params = {
+        "fields": "id,caption,permalink,timestamp",
+        "limit": 3,
+        "access_token": access_token
+    }
+    try:
+        res = requests.get(url, params=params, timeout=15)
+        if res.status_code == 200:
+            data = res.json().get("data", [])
+            clean_needle = match_caption.strip()[:40].lower() if match_caption else ""
+
+            for item in data:
+                item_caption = str(item.get("caption", "")).strip().lower()
+                if clean_needle and clean_needle in item_caption:
+                    media_id = item.get("id")
+                    permalink = item.get("permalink") or f"https://www.instagram.com/p/{media_id}/"
+                    return True, media_id, permalink
+    except Exception as e:
+        print(f"⚠️ [IG RECOVERY WARN] Ralat semasa semakan pemulihan: {e}")
+
+    return False, None, None
+
+
 def post_to_instagram_feed(account_id: str, access_token: str, caption: str, image_url: str):
     """
-    Menerbitkan gambar ke Instagram Feed menggunakan aliran Container -> Publish.
+    Menerbitkan gambar ke Instagram Feed menggunakan aliran Container -> Publish
+    lengkap dengan mekanisme auto-recovery jika berlaku kekangan had Meta.
     """
     if not account_id or not access_token:
         return False, "Kunci INSTAGRAM_ACCOUNT_ID atau INSTAGRAM_ACCESS_TOKEN tidak dijumpai."
@@ -119,7 +151,12 @@ def post_to_instagram_feed(account_id: str, access_token: str, caption: str, ima
         print(f"✅ [IG STEP A SUCCESS] Container ID: {creation_id}")
 
         # Tunggu sehingga fail imej siap diproses di CDN Meta
-        wait_for_container_ready(creation_id, access_token, timeout=20)
+        status = wait_for_container_ready(creation_id, access_token, timeout=25)
+        if status == "ERROR":
+            return False, "Meta gagal memproses fail imej (Status Container: ERROR)."
+
+        # Beri jeda 3 saat bagi mengelakkan ralat burst limit Meta
+        time.sleep(3)
 
         # =====================================================================
         # LANGKAH 2: Terbitkan Media Container ke Instagram Feed
@@ -134,19 +171,31 @@ def post_to_instagram_feed(account_id: str, access_token: str, caption: str, ima
         res_publish = requests.post(publish_url, data=publish_payload, timeout=30)
         publish_json = res_publish.json()
 
-        if res_publish.status_code != 200 or "id" not in publish_json:
-            err = publish_json.get("error", {})
-            err_msg = err.get("message", res_publish.text)
-            return False, f"Langkah B Gagal: {err_msg}"
+        if res_publish.status_code == 200 and "id" in publish_json:
+            media_id = publish_json["id"]
+            permalink = get_instagram_permalink(media_id, access_token)
+            return True, {
+                "media_id": media_id,
+                "permalink": permalink,
+                "post_url": permalink
+            }
 
-        media_id = publish_json["id"]
-        permalink = get_instagram_permalink(media_id, access_token)
+        # Jika Langkah B memberi ralat (cth: 'Application request limit reached'), lakukan Self-Healing Verification
+        err = publish_json.get("error", {})
+        err_msg = err.get("message", res_publish.text)
+        print(f"⚠️ [IG PUBLISH NOTICE] Respon Meta: {err_msg}. Menyemak status penerbitan sebenar di profil...")
 
-        return True, {
-            "media_id": media_id,
-            "permalink": permalink,
-            "post_url": permalink
-        }
+        time.sleep(3)
+        is_found, rec_id, rec_permalink = check_recent_published_post(account_id, access_token, caption)
+        if is_found:
+            print(f"🎉 [IG AUTO-RECOVERY SUCCESS] Hantaran disahkan wujud dan berjaya diterbitkan di Instagram!")
+            return True, {
+                "media_id": rec_id,
+                "permalink": rec_permalink,
+                "post_url": rec_permalink
+            }
+
+        return False, f"Langkah B Gagal: {err_msg}"
 
     except Exception as e:
         return False, f"Ralat Rangkaian Instagram API: {str(e)}"
