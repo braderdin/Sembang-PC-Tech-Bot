@@ -8,7 +8,7 @@ idna>=3.7
 six>=1.16.0
 
 # Video & Audio Engine (Reels & Story Stitching)
-moviepy>=2.0.0
+moviepy>=2.2.1
 imageio>=2.37.4
 imageio-ffmpeg>=0.5.0
 mutagen>=1.47.0
