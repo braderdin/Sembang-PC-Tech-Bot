@@ -3,7 +3,7 @@
 Shopee Feed Auto-Poster: Step 3 (Instagram Module)
 Workflow Runner:
 1. Read 'temp/shopee_payload.json'.
-2. Create Instagram Single-Photo Media Container via Meta Graph API.
+2. Create Instagram Single-Photo Media Container via Meta Graph API (Auto-Retry 2x).
 3. Wait for Media Container status to become FINISHED.
 4. Publish container to Instagram Professional Profile Feed.
 5. Self-Healing Verification: Auto-detect published post if Meta returns transient rate-limit warning.
@@ -119,7 +119,7 @@ def check_recent_published_post(account_id: str, access_token: str, match_captio
 def post_to_instagram_feed(account_id: str, access_token: str, caption: str, image_url: str):
     """
     Menerbitkan gambar ke Instagram Feed menggunakan aliran Container -> Publish
-    lengkap dengan mekanisme auto-recovery jika berlaku kekangan had Meta.
+    lengkap dengan mekanisme auto-recovery dan auto-retry 2x jika berlaku gangguan CDN/Meta.
     """
     if not account_id or not access_token:
         return False, "Kunci INSTAGRAM_ACCOUNT_ID atau INSTAGRAM_ACCESS_TOKEN tidak dijumpai."
@@ -136,19 +136,31 @@ def post_to_instagram_feed(account_id: str, access_token: str, caption: str, ima
 
     try:
         # =====================================================================
-        # LANGKAH 1: Cipta Media Container di Instagram API
+        # LANGKAH 1: Cipta Media Container di Instagram API (Auto-Retry 2x)
         # =====================================================================
         print(f"📸 [IG STEP A] Membina Media Container Instagram (Panjang Teks: {len(caption)} aksara)...")
-        res_container = requests.post(container_url, data=container_payload, timeout=30)
-        container_json = res_container.json()
+        creation_id = None
+        last_err_a = ""
 
-        if res_container.status_code != 200 or "id" not in container_json:
-            err = container_json.get("error", {})
-            err_msg = err.get("message", res_container.text)
-            return False, f"Langkah A Gagal: {err_msg}"
+        for attempt in range(2):
+            res_container = requests.post(container_url, data=container_payload, timeout=30)
+            try:
+                container_json = res_container.json()
+            except Exception:
+                container_json = {}
 
-        creation_id = container_json["id"]
-        print(f"✅ [IG STEP A SUCCESS] Container ID: {creation_id}")
+            if res_container.status_code == 200 and "id" in container_json:
+                creation_id = container_json["id"]
+                print(f"✅ [IG STEP A SUCCESS] Container ID: {creation_id}")
+                break
+            else:
+                err = container_json.get("error", {})
+                last_err_a = err.get("message", res_container.text)
+                if attempt == 0:
+                    print(f"⚠️ [IG STEP A RETRY] Percubaan 1 gagal ({last_err_a[:60]}...). Menunggu 3 saat...")
+                    time.sleep(3)
+                else:
+                    return False, f"Langkah A Gagal: {last_err_a}"
 
         # Tunggu sehingga fail imej siap diproses di CDN Meta
         status = wait_for_container_ready(creation_id, access_token, timeout=25)
@@ -229,10 +241,18 @@ def run_instagram_posting():
             json.dump(payload, f, ensure_ascii=False, indent=2)
         return
 
-    # 2. Dapatkan data hantaran dari payload
+    # 2. Dapatkan data hantaran dari payload secara seragam & selamat
     caption = payload.get("ai_captions", {}).get("instagram", "")
-    image_url = payload.get("picture_url", "")
-    product_name = payload.get("product_name", "Produk Shopee")
+    image_url = (
+        payload.get("picture_url")
+        or payload.get("shopee_picture_url")
+        or payload.get("image_url", "")
+    )
+    product_name = (
+        payload.get("product_name")
+        or payload.get("shopee_product_name")
+        or payload.get("title", "Produk Shopee")
+    )
 
     print(f"📦 Produk : {product_name}")
     print(f"🖼️ Gambar : {image_url}")
