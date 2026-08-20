@@ -50,11 +50,19 @@ def ensure_temp_dir():
 
 
 def clean_image_url(url: str) -> str:
-    """Memperbetulkan extension bertindih atau parameter URL tidak sah."""
+    """
+    Memperbetulkan extension bertindih atau menambah sambungan .jpg
+    secara automatik bagi format CDN Shopee untuk keserasian Meta Graph API.
+    """
     if not url:
         return ""
     cleaned = re.sub(r"(\.(jpg|jpeg|png|webp))\.\2$", r"\1", str(url).strip(), flags=re.I)
     cleaned = re.sub(r"(\.(jpg|jpeg|png|webp))\1$", r"\1", cleaned, flags=re.I)
+
+    # Jika URL Shopee sah tetapi tiada extension di hujung, Meta Graph API memerlukan .jpg
+    if "susercontent.com" in cleaned and not any(cleaned.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+        cleaned = f"{cleaned}.jpg"
+
     return cleaned
 
 
