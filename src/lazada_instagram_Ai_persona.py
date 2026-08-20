@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shopee Instagram & Pinterest AI Persona Engine (Abang Din Style)
+Lazada Instagram & Pinterest AI Persona Engine (Abang Din Style)
 Sembang PC & Tech Ecosystem (100% Dynamic OpenRouter & Glitch-Proof)
 Features:
 - Programmatic Locked Footer: Direct Affiliate URL for Pinterest + Compact Telegram CTA + 3 Focused Hashtags
@@ -88,15 +88,13 @@ def extract_search_keyword(title: str, max_words: int = 3) -> str:
     if not title:
         return "Gajet"
 
-    clean = re.sub(r'^[\[【][^\]】]*[\]】]\s*', '', str(title))
-    clean = re.sub(r'[\[\]\(\)\#\|\/\-\+\:\,\.【】]', ' ', clean)
+    clean = re.sub(r'[\[\]\(\)\#\|\/\-\+\:\,\.]', ' ', str(title))
     words = [w.strip() for w in clean.split() if len(w.strip()) > 1 and not w.strip().isdigit()]
 
     stop_words = {
         'original', 'ready', 'stock', 'new', 'pro', 'set', 'hot', 'offer',
         'murah', 'padu', 'high', 'quality', 'fast', 'delivery', 'warranty',
-        'compatible', 'for', 'system', 'free', 'shipping', 'flagship', 'store',
-        'official', 'shopee', 'lazada'
+        'lazada', 'shopee', 'flagship', 'store', 'official'
     }
 
     filtered = []
@@ -141,8 +139,8 @@ def is_valid_ig_body(text: str, min_len: int = 100, max_len: int = 300) -> bool:
     return True
 
 
-class ShopeeInstagramAIPersona:
-    """Enjin AI Persona Instagram & Pinterest khusus untuk produk affiliate Shopee."""
+class LazadaInstagramAIPersona:
+    """Enjin AI Persona Instagram & Pinterest khusus untuk produk affiliate Lazada."""
 
     def __init__(self):
         self.base_url = (os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").strip().rstrip("/")
@@ -156,20 +154,19 @@ class ShopeeInstagramAIPersona:
         Memulangkan: (success_bool, full_caption_text)
         """
         raw_title = str(
-            product_data.get("product_name")
-            or product_data.get("shopee_product_name")
-            or product_data.get("title")
-            or "Aksesori Komputer Pilihan"
+            product_data.get("title")
+            or product_data.get("product_name")
+            or product_data.get("lazada_product_name")
+            or "Gajet Pilihan"
         ).strip()
 
         clean_title = re.sub(r'\s+', ' ', raw_title)[:60].strip()
-        price = product_data.get("price") or product_data.get("shopee_price") or ""
-        category = product_data.get("category") or product_data.get("shopee_category") or "Aksesori PC & Gajet"
-        brand = str(product_data.get("brand") or product_data.get("shopee_brand") or "").strip()
+        price = product_data.get("price") or product_data.get("lazada_price") or ""
+        category = product_data.get("category") or product_data.get("lazada_category") or "Gajet & Komputer"
         aff_link = str(
             product_data.get("affiliate_link")
-            or product_data.get("shopee_affiliate_link")
             or product_data.get("promo_short_link")
+            or product_data.get("lazada_affiliate_link")
             or ""
         ).strip()
 
@@ -177,23 +174,22 @@ class ShopeeInstagramAIPersona:
         price_str = f"RM {float(price):.2f}" if price and str(price).replace('.', '', 1).isdigit() else ""
 
         # Struktur Footer Terkunci Rasmi Pilihan A (Jimat ~20 Aksara, Bebas Halusinasi URL)
-        link_line = f"🔗 Pautan Rasmi: {aff_link}" if aff_link else "🔗 Pautan Rasmi: Dapatkan di Shopee sekarang"
+        link_line = f"🔗 Pautan Rasmi: {aff_link}" if aff_link else "🔗 Pautan Rasmi: Dapatkan di Lazada sekarang"
         telegram_cta = f"👉 Link di Bio / taip \"{search_kw}\" di Telegram Bot: lubuk_barang_murah_padu_bot"
-        hashtags = "#RacunGajet #SembangPCTech #ShopeeMY"
+        hashtags = "#RacunGajet #SembangPCTech #LazadaMY"
         locked_footer = f"{link_line}\n{telegram_cta}\n\n{hashtags}"
 
         # Badan ulasan sandaran diperluas jika OpenRouter gagal
         price_display = f" ({price_str})" if price_str else ""
-        brand_tag = f" daripada {brand}" if brand else ""
         fallback_body = (
-            f"Korang yang tengah nak kemaskan ruang setup meja atau cari barang praktikal, tengok {clean_title}{brand_tag}{price_display} ni!\n\n"
-            f"• Kualiti binaan kemas, tahan lasak & sangat memudahkan kegunaan harian.\n"
-            f"• Nilai terbaik dan sangat berbaloi untuk setup kerja mahupun gaming."
+            f"Korang yang tengah nak kemaskan ruang setup meja atau perlukan gajet praktikal, tengok {clean_title}{price_display} ni!\n\n"
+            f"• Kualiti binaan solid, reka bentuk kemas dan tahan lama untuk kegunaan harian.\n"
+            f"• Prestasi sangat memuaskan dengan harga tawaran yang cukup berbaloi."
         )
         fallback_full = f"{fallback_body}\n\n{locked_footer}"
 
         if not self.base_url or not self.model or not self.api_key:
-            print("⚠️ [SHOPEE IG AI WARN] Kunci OpenRouter tidak lengkap, menggunakan kapsyen sandaran.")
+            print("⚠️ [LAZADA IG AI WARN] Kunci OpenRouter tidak lengkap, menggunakan kapsyen sandaran.")
             return True, fallback_full
 
         headers = {
@@ -206,7 +202,6 @@ class ShopeeInstagramAIPersona:
         user_prompt = f"""
 Sila hasilkan 1 ulasan padu (180 - 240 aksara) untuk produk ini:
 - Produk: {clean_title}
-- Jenama: {brand if brand else 'Pilihan Ramai'}
 - Kategori: {category}
 - Harga: {price_str if price_str else 'Promosi Berbaloi'}
 
@@ -233,7 +228,7 @@ Peringatan: JANGAN letak pautan atau hashtag. Tulis badan ulasan sahaja.
 
         for attempt in range(3):
             try:
-                print(f"🤖 [SHOPEE IG AI] Menjana ulasan Instagram (Percubaan {attempt + 1}/3)...")
+                print(f"🤖 [LAZADA IG AI] Menjana ulasan Instagram (Percubaan {attempt + 1}/3)...")
                 res = requests.post(url, headers=headers, json=payload, timeout=25)
                 res.encoding = "utf-8"
 
@@ -252,17 +247,17 @@ Peringatan: JANGAN letak pautan atau hashtag. Tulis badan ulasan sahaja.
                                 trimmed_body = cleaned_body[:max_body].rsplit(" ", 1)[0] + "..."
                                 full_caption = f"{trimmed_body}\n\n{locked_footer}"
 
-                            print(f"✅ [SHOPEE IG AI SUCCESS] Kapsyen Instagram berjaya dijana ({len(full_caption)} aksara | Kata Kunci: '{search_kw}').")
+                            print(f"✅ [LAZADA IG AI SUCCESS] Kapsyen Instagram berjaya dijana ({len(full_caption)} aksara | Kata Kunci: '{search_kw}').")
                             return True, full_caption
                         else:
-                            print(f"⚠️ [SHOPEE IG AI GLITCH] Teks tidak menepati kualiti pada percubaan {attempt + 1}. Mencuba semula...")
+                            print(f"⚠️ [LAZADA IG AI GLITCH] Teks tidak menepati kualiti pada percubaan {attempt + 1}. Mencuba semula...")
                 else:
-                    print(f"⚠️ [SHOPEE IG AI HTTP ERROR] HTTP {res.status_code}: {res.text}")
+                    print(f"⚠️ [LAZADA IG AI HTTP ERROR] HTTP {res.status_code}: {res.text}")
 
             except Exception as e:
-                print(f"⚠️ [SHOPEE IG AI EXCEPTION - ATTEMPT {attempt + 1}]: {str(e)}")
+                print(f"⚠️ [LAZADA IG AI EXCEPTION - ATTEMPT {attempt + 1}]: {str(e)}")
 
-        print("🛡️ [SHOPEE IG AI FALLBACK] Mengaktifkan kapsyen Instagram sandaran bersih.")
+        print("🛡️ [LAZADA IG AI FALLBACK] Mengaktifkan kapsyen Instagram sandaran bersih.")
         return True, fallback_full
 
     def generate_affiliate_caption(self, product_data: Dict[str, Any]) -> str:
@@ -272,5 +267,5 @@ Peringatan: JANGAN letak pautan atau hashtag. Tulis badan ulasan sahaja.
 
 
 # Singleton instance & alias keserasian
-shopee_instagram_ai = ShopeeInstagramAIPersona()
-instagram_ai = shopee_instagram_ai
+lazada_instagram_ai = LazadaInstagramAIPersona()
+instagram_ai = lazada_instagram_ai

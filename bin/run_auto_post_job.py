@@ -19,18 +19,18 @@ else:
 
 # Import modul tempatan dari src
 from src.supabase_db import fetch_unused_links, mark_link_as_used, get_supabase_config
-from src.redis_db import is_product_posted, mark_product_posted
-from src.vector_db import is_similar_product_posted, mark_vector_posted
-from src.ai_persona import generate_caption
+from lazada_redis_filter import is_product_posted, mark_product_posted
+from lazada_vector_filter import is_similar_product_posted, mark_vector_posted
+from lazada_fb_Ai_persona import generate_caption
 from src.telegram_bot import send_photo_to_telegram
 from src.facebook_bot import send_to_facebook_page
 from src.threads_bot import send_to_threads
-from src.threads_ai_persona import generate_threads_affiliate_caption
+from lazada_thread_Ai_persona import generate_threads_affiliate_caption
 from src.threads_token_manager import get_active_threads_token
 
 # Import Modul Khas Instagram & Audit Telegram
 from src.instagram_bot import instagram_bot
-from src.instagram_ai_persona import instagram_ai
+from lazada_instagram_Ai_persona import instagram_ai
 from src.instagram_redis import instagram_redis
 from src.instagram_audit import send_instagram_audit_to_telegram
 
@@ -108,7 +108,7 @@ def run_auto_posting_job():
     threads_token = get_active_threads_token(redis_url, redis_token, raw_threads_token)
 
     print("\n📦 [STEP 1] Membaca pautan dari Supabase Cloud...")
-    ok, candidate_list, err_msg = fetch_unused_links(limit=500)
+    ok, candidate_list, err_msg = fetch_unused_links(limit=300)
 
     if not ok or not candidate_list:
         print("⚠️ Tiada pautan status_used=false. Membaca senarai pautan keseluruhan dari Supabase...")

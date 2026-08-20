@@ -44,8 +44,8 @@ else:
 
 # Import Project Modules
 from src.supabase_db import fetch_unused_links, mark_link_as_used, get_supabase_config
-from src.redis_db import is_product_posted, mark_product_posted
-from src.vector_db import is_similar_product_posted, mark_vector_posted
+from lazada_redis_filter import is_product_posted, mark_product_posted
+from lazada_vector_filter import is_similar_product_posted, mark_vector_posted
 from src.pexels_reel_bot import upload_reel_to_facebook
 from src.pexels_reel_bot_instagram import instagram_reel_bot
 from src.pexels_reel_bot_threads import threads_reel_bot

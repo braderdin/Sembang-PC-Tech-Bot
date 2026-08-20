@@ -29,7 +29,7 @@ from src.lifestyle_reel_bot import send_lifestyle_to_facebook_reel
 from src.telegram_bot import send_photo_to_telegram
 from src.facebook_bot import send_to_facebook_page
 from src.threads_bot import send_to_threads
-from src.threads_ai_persona import generate_threads_lifestyle_caption
+from lazada_thread_Ai_persona import generate_threads_lifestyle_caption
 from src.threads_token_manager import get_active_threads_token
 
 # Import Modul Pangkalan Data KHAS Lifestyle
@@ -44,7 +44,7 @@ from src.lifestyle_vector_db import (
 
 # Import Modul Khas Instagram & Audit Telegram
 from src.instagram_bot import instagram_bot
-from src.instagram_ai_persona import instagram_ai
+from lazada_instagram_Ai_persona import instagram_ai
 from src.instagram_audit import send_instagram_audit_to_telegram
 
 
