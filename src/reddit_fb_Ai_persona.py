@@ -4,10 +4,11 @@ Reddit Tech Storyteller Engine: Facebook Page AI Persona Module
 Lokasi Fail: src/reddit_fb_Ai_persona.py
 
 Ciri-ciri Penambahbaikan (Tuned):
-1. Dinamik 100% (Sifar Hardcode Model): Membaca REDDIT_OPENROUTER_MODEL, REDDIT_OPENROUTER_MODEL_FALLBACK, dan fallback am OPENROUTER_MODEL secara telus daripada persekitaran.
-2. Penyingkiran Penalti Inferens: Membuang parameter presence_penalty dan frequency_penalty untuk keserasian optimum model Gemma 4 di OpenRouter.
-3. Penapis Anti-Thinking & Glitch Cleaner: Menapis blok pemikiran (<think>...</think>), teks analisis draf AI, mojibake, dan token LLM rosak.
-4. Kapsyen Penceritaan Natural (500 – 750 Aksara): Mengukuhkan persona 'Abang Din' dengan penceritaan santai Bahasa Melayu komuniti teknologi tempatan.
+1. Penceritaan Manusia Sebenar (Organic Storytelling): Membuang kekangan templat tegar (seperti syarat wajib tepat 2 bullet points) dan memberi kebebasan gaya naratif yang lebih hidup, beremosi, dan bersahaja.
+2. Dinamik 100% (Sifar Hardcode Model): Membaca REDDIT_OPENROUTER_MODEL, REDDIT_OPENROUTER_MODEL_FALLBACK, dan fallback am OPENROUTER_MODEL secara telus daripada persekitaran.
+3. Penyingkiran Penalti Inferens: Membuang parameter presence_penalty dan frequency_penalty untuk keserasian optimum pelayan OpenRouter.
+4. Penapis Anti-Thinking & Glitch Scrubber: Menapis blok pemikiran (<think>...</think>), draf analisis AI, mojibake, dan token LLM rosak.
+5. Kawalan Siling & Guardrail (500 – 750 Aksara): Menjamin panjang hantaran optimum bersama pengesahan kosa kata Bahasa Melayu santai.
 """
 
 import os
@@ -39,7 +40,7 @@ MALAY_ANCHOR_WORDS = {
     "kita", "korang", "saya", "buat", "bila", "dengan", "pun", "rasa",
     "meja", "setup", "pc", "kerja", "santai", "tengok", "dalam", "untuk",
     "tak", "bukan", "memang", "lagi", "padu", "kemas", "hujung", "minggu",
-    "malam", "pagi", "petang", "gajet", "murah", "berbaloi", "cerita", "abang"
+    "malam", "pagi", "petang", "gajet", "murah", "berbaloi", "cerita", "abang", "lepak"
 }
 
 FORBIDDEN_WORDS = {
@@ -57,13 +58,13 @@ def get_current_myt_details() -> Dict[str, Any]:
 
     hour = now.hour
     if 4 <= hour < 12:
-        slot_desc = "Pagi (Mood Semangat, Fokus & Produktiviti Mula Hari)"
+        slot_desc = "Pagi (Mood Semangat, Ruang Meja Segar & Produktiviti Mula Hari)"
     elif 12 <= hour < 17:
-        slot_desc = "Petang (Mood Mid-Day Tech, Eksperimen & Sembang Komputer)"
+        slot_desc = "Petang (Mood Aliran Kerja IT, Eksperimen & Sembang Komputer)"
     elif 17 <= hour < 21:
-        slot_desc = "Malam Awal (Mood Santai Lepak, Borak Gajet & Review)"
+        slot_desc = "Malam Awal (Mood Lepak Santai, Borak Gajet & Review)"
     else:
-        slot_desc = "Lewat Malam (Mood Rehat, Kopi, Setup Estetik & Cerita Nostalgia)"
+        slot_desc = "Larut Malam (Mood Tenang, Kopi, Setup Estetik & Cerita Nostalgia)"
 
     return {
         "full_date_str": f"{now.day} {month_my} {now.year}",
@@ -78,7 +79,7 @@ def get_current_myt_details() -> Dict[str, Any]:
 def clean_glitches_and_meta(text: str) -> str:
     """
     Membersihkan token LLM, simbol mojibake, tag pemikiran reasoning (<think>),
-    serta mukadimah pembantu AI.
+    serta mukadimah templat AI.
     """
     if not text:
         return ""
@@ -93,12 +94,12 @@ def clean_glitches_and_meta(text: str) -> str:
     text = re.sub(r'[ðâ][\x80-\xbf]{1,4}', '', text)
     text = re.sub(r'[\x80-\x9f]', '', text)
 
-    # 3. Standardkan simbol bullet points
+    # 3. Standardkan simbol bullet points jika ada
     for sym in ["❖", "◆", "◇", "►", "▪", "▲", "★", "➡", "➢", "*", "-"]:
         text = text.replace(sym, "•")
 
     # 4. Buang mukadimah dan header templat
-    text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption|post|hantaran|cerita|kisah|ulasan)[^\n]*?\n+', '', text)
+    text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption|post|hantaran|cerita|kisah|ulasan|facebook)[^\n]*?\n+', '', text)
     text = re.sub(r'(?i)\*\*caption\s*(?:facebook)?\s*:\*\*', '', text)
     text = re.sub(r'\*\*\*', '', text)
     text = re.sub(r'https?://\S+', '', text)
@@ -180,7 +181,7 @@ class RedditFBAIPersona:
             or os.getenv("OPENROUTER_MODEL_FALLBACK", "").strip()
         )
         self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-        self.temperature = 0.65
+        self.temperature = 0.7
         self.max_tokens = 900
         self.cooldown_delay = 3.5
 
@@ -237,7 +238,7 @@ class RedditFBAIPersona:
 
     def generate_caption(self, post_data: Dict[str, Any], temporal_ctx: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """
-        Menjana penceritaan Facebook santai (500 - 750 Aksara)
+        Menjana penceritaan Facebook santai, bervariasi dan hidup (500 - 750 Aksara)
         dengan kawalan masa Malaysia dan model failover.
         """
         raw_title = str(post_data.get("title") or "Topik PC & Tech Pilihan").strip()
@@ -245,19 +246,16 @@ class RedditFBAIPersona:
         cleaned_text = str(post_data.get("cleaned_text") or "").strip()
         subreddit = str(post_data.get("subreddit") or "tech").strip()
 
-        # Bina maklumat konteks masa terkini
         time_info = temporal_ctx if temporal_ctx else get_current_myt_details()
         formatted_time = time_info.get("formatted_context", "Waktu Malaysia (MYT)")
 
         hashtags_block = "\n\n#SembangPCTech #TechMalaysia #PCSetup #KisahTech"
 
         fallback_story = (
-            f"Korang yang tengah layan setup meja atau rileks santai waktu ni, jom tengok perkongsian daripada r/{subreddit} ni. "
-            f"Bila sebut pasal inovasi tech dan modding, memang tak pernah habis idea kreatif yang muncul.\n\n"
-            f"Antara perkara menarik yang kita boleh tengok:\n"
-            f"• Kreativiti susun atur dan penyelesaian masalah praktikal\n"
-            f"• Memberi inspirasi baru untuk kemaskan ruang kerja kita\n\n"
-            f"Korang sendiri pernah buat modding atau setup pelik macam ni tak? Cerita sikit kat ruangan komen bawah! 👇{hashtags_block}"
+            f"Tengah lepak santai waktu ni, terjumpa satu perkongsian menarik dari komuniti r/{subreddit}. "
+            f"Bila tengok projek dan hasil kerja macam ni, memang terasa vibe kepuasan peminat tech yang sanggup luang masa kemaskan ruang setup.\n\n"
+            f"Bukan pasal barang mahal semata-mata, tapi kreativiti susun atur dan penyelesaian masalah yang buat kita rasa terinspirasi nak upgrade meja sendiri.\n\n"
+            f"Korang yang tengah layan setup sekarang, apa bahagian paling mencabar bila nak buat cable management atau pasang part baru? Cerita sikit kat bawah! 👇{hashtags_block}"
         )
 
         if not self.api_key:
@@ -266,30 +264,31 @@ class RedditFBAIPersona:
 
         system_prompt = f"""
 Anda adalah "Abang Din", pengasas dan pencerita utama Facebook Page "Sembang PC & Tech Malaysia".
-Gaya anda: Storytelling santai, bersahaja, kelakar sempoi, berilmu tentang teknologi PC/gajet, dan mesra komuniti Malaysia.
+Personaliti anda: Peminat tegar PC & gajet yang mesra, bersahaja, kelakar sempoi, dan bercerita seperti seorang kawan lama yang sedang lepak mengeteh borak teknologi.
 
 MAKLUMAT MASA SEMASA (MALAYSIA):
 {formatted_time}
 
-PANDUAN PENULISAN FACEBOOK (HAD KETAT: 500 HINGGA 750 AKSARA):
-1. BAHASA: 100% Bahasa Melayu santai harian Malaysia ("Korang yang tengah lepak...", "Bila tengok perkongsian ni...", "Memang padu betul", "Kemas habis susun atur ni").
-2. DILARANG SAMA SEKALI menggunakan perkataan Bahasa Indonesia ("bisa", "banget", "nggak", "kamu", "anda").
-3. STRUKTUR TEKS:
-   - Fasa 1 (Hook Penceritaan): Mulakan dengan reaksi santai mengaitkan kisah Reddit ini dengan mood masa sekarang.
-   - Fasa 2 (Poin Menarik): Ulas intipati menarik atau tips praktikal menggunakan TEPAT 2 simbol bullet point (•).
-   - Fasa 3 (Soalan Komen): Akhiri dengan 1 soalan santai untuk memancing perbincangan komuniti di ruangan komen.
-4. ARAHAN PANTANGAN KETAT:
+PANDUAN PENCERITAAN FACEBOOK (HAD KETAT: 500 HINGGA 750 AKSARA):
+1. GAYA BAHASA: 100% Bahasa Melayu santai harian komuniti PC tempatan ("Korang yang tengah lepak...", "Bila Abang tengok projek ni...", "Memang salute betul cara dia buat...", "Fuh, rasa puas tengok susunan ni").
+2. DILARANG SAMA SEKALI menggunakan perkataan Bahasa Indonesia ("bisa", "banget", "nggak", "ngak", "gimana", "komputer jinjing", "ponsel", "kamu", "anda").
+3. STRUKTUR NARRATIVE HIDUP (BEBAS DARI TEMPLAT KAKU):
+   - Mulakan dengan reaksi spontan mengaitkan topik Reddit dengan mood waktu sekarang (pagi/petang/malam).
+   - Ceritakan intipati atau perkara menarik/pelik/inspirasi di sebalik gambar & kisah ini dengan gaya ulasan peribadi yang ada "jiwa".
+   - Boleh ditulis dalam 2-3 perenggan santai atau gabungan ayat penceritaan yang mengalir lancar. JANGAN paksa diri menggunakan format template kaku atau senarai bernombor jika tidak sesuai.
+   - Akhiri dengan pandangan jujur Abang Din dan satu soalan santai untuk ajak komuniti bersembang di ruangan komen.
+4. PANTANGAN KETAT:
    - DILARANG letak sebarang pautan URL di dalam teks.
-   - DILARANG tulis proses pemikiran, analisis draf, atau mukadimah AI (DILARANG tulis "Berikut adalah kapsyen:", dll).
-   - TERUS TULIS AYAT KANDUNGAN. Jumlah panjang keseluruhan WAJIB antara 500 hingga 750 aksara.
+   - DILARANG letak mukadimah AI (DILARANG tulis "Berikut adalah...", "Caption Facebook:", dsb.).
+   - TERUS TULIS AYAT KANDUNGAN. Panjang teks keseluruhan (termasuk hashtags) WAJIB berada dalam julat 500 hingga 750 aksara.
 """
 
         user_prompt = f"""
-Sila olah topik daripada komuniti r/{subreddit} ini menjadi satu penceritaan Facebook santai:
+Kisah / Topik Reddit daripada r/{subreddit}:
 - Tajuk Pos: {clean_title}
-- Intipati Kisah/Artikel: {cleaned_text[:600] if cleaned_text else 'Perkongsian inovasi perkakasan, reka bentuk setup meja, atau ulasan teknologi menarik.'}
+- Intipati Kisah/Visual: {cleaned_text[:600] if cleaned_text else 'Perkongsian visual perkakasan, reka bentuk setup meja, atau ulasan teknologi menarik.'}
 
-Tulis 1 kapsyen Facebook lengkap (500 - 750 aksara):
+Olah menjadi 1 kapsyen Facebook yang hidup, santai dan memikat (500 - 750 aksara):
 """
 
         models_queue = [m for m in [self.model_primary, self.model_fallback] if m]

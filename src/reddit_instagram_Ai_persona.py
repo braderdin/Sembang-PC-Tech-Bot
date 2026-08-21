@@ -4,10 +4,11 @@ Reddit Tech Storyteller Engine: Instagram AI Persona Module
 Lokasi Fail: src/reddit_instagram_Ai_persona.py
 
 Ciri-ciri Penambahbaikan (Tuned):
-1. Dinamik 100% (Sifar Hardcode Model): Membaca REDDIT_OPENROUTER_MODEL, REDDIT_OPENROUTER_MODEL_FALLBACK, dan fallback am OPENROUTER_MODEL secara telus daripada persekitaran.
-2. Penyingkiran Penalti Inferens: Membuang parameter presence_penalty dan frequency_penalty untuk keserasian optimum model Gemma 4 di OpenRouter.
-3. Penapis Anti-Thinking & Glitch Cleaner: Menapis blok pemikiran (<think>...</think>), draf proses analisis AI, mojibake, dan token LLM rosak.
-4. Visual Storytelling (500 – 750 Aksara): Mengukuhkan persona Abang Din di Instagram bersama 2 poin bullet (•), seruan simpan/komen (CTA), dan set hashtag rasmi.
+1. Penceritaan Visual Organik (Aesthetic Tech Storytelling): Membuang syarat templat kaku (seperti kewajipan 2 bullet points) dan membuka ruang kepada penceritaan visual yang lebih mengalir, ekspresif, dan relevan dengan komuniti Instagram.
+2. Dinamik 100% (Sifar Hardcode Model): Membaca REDDIT_OPENROUTER_MODEL, REDDIT_OPENROUTER_MODEL_FALLBACK, dan fallback am OPENROUTER_MODEL secara telus daripada persekitaran.
+3. Penyingkiran Penalti Inferens: Membuang parameter presence_penalty dan frequency_penalty untuk keserasian optimum model pelayan OpenRouter.
+4. Penapis Anti-Thinking & Glitch Scrubber: Menapis blok pemikiran (<think>...</think>), draf proses analisis AI, mojibake, dan token LLM rosak.
+5. Kawalan Siling Ketat (500 – 750 Aksara): Memastikan hantaran Instagram padat, sedap dibaca bersama seruan interaksi (CTA) dan set hashtag rasmi.
 """
 
 import os
@@ -93,7 +94,7 @@ def clean_glitches_and_meta(text: str) -> str:
     text = re.sub(r'[ðâ][\x80-\xbf]{1,4}', '', text)
     text = re.sub(r'[\x80-\x9f]', '', text)
 
-    # 3. Standardkan simbol bullet point
+    # 3. Standardkan simbol bullet point jika wujud
     for sym in ["❖", "◆", "◇", "►", "▪", "▲", "★", "➡", "➢", "*", "-"]:
         text = text.replace(sym, "•")
 
@@ -180,7 +181,7 @@ class RedditInstagramAIPersona:
             or os.getenv("OPENROUTER_MODEL_FALLBACK", "").strip()
         )
         self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-        self.temperature = 0.65
+        self.temperature = 0.7
         self.max_tokens = 900
         self.cooldown_delay = 3.5
 
@@ -237,7 +238,7 @@ class RedditInstagramAIPersona:
 
     def generate_caption(self, post_data: Dict[str, Any], temporal_ctx: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """
-        Menjana kapsyen Instagram visual & estetik (500 - 750 Aksara)
+        Menjana kapsyen Instagram visual & estetik yang bernyawa (500 - 750 Aksara)
         dengan kawalan masa Malaysia dan model failover.
         """
         raw_title = str(post_data.get("title") or "Inspirasi Setup & Tech Pilihan").strip()
@@ -251,11 +252,10 @@ class RedditInstagramAIPersona:
         hashtags_block = "\n\n#SembangPCTech #SetupInspirasi #PCGamerMY #RacunSetup #TechLifestyle"
 
         fallback_story = (
-            f"Kreativiti tanpa batas bila peminat teknologi berkongsi karya mereka di r/{subreddit}. "
-            f"Bukan sekadar perkakasan semata-mata, tapi tentang kepuasan bila ruang kerja dan hobi kita bergabung kemas.\n\n"
-            f"• Inspirasi susun atur yang lebih kemas, teratur & minimalis\n"
-            f"• Nilai estetika yang menaikkan mood produktiviti harian kita\n\n"
-            f"Korang suka konsep setup macam ni atau lebih minat gaya klasik RGB? Simpan post ni untuk idea upgrade korang & drop komen di bawah ya! 👇{hashtags_block}"
+            f"Bila tengok perkongsian daripada komuniti r/{subreddit} ni, terus rasa terinspirasi dengan kekemasan dan vibe ruang kerja dia. "
+            f"Bukan mudah nak balance antara fungsi perkakasan yang padu dengan susun atur yang sedap mata memandang.\n\n"
+            f"Kadang-kadang idea kecil macam pencahayaan ambient yang tepat atau cara sorok wayar yang kemas boleh ubah keseluruhan mood bilik kita.\n\n"
+            f"Korang suka tema macam ni atau jenis yang penuh RGB? Simpan post ni untuk idea upgrade meja korang dan drop komen kat bawah ya! 👇{hashtags_block}"
         )
 
         if not self.api_key:
@@ -264,22 +264,22 @@ class RedditInstagramAIPersona:
 
         system_prompt = f"""
 Anda adalah "Abang Din" di Instagram @SembangPCTech Malaysia.
-Gaya anda: Visual Storytelling yang santai, estetik, berilmu, dan memberi inspirasi kepada peminat teknologi, perkakasan PC, dan gaming tempatan.
+Gaya anda: Visual Tech Storyteller yang santai, estetik, berilmu, dan memberi inspirasi kepada peminat perkakasan PC, modding, dan susun atur meja gaming tempatan.
 
 MAKLUMAT MASA SEMASA (MALAYSIA):
 {formatted_time}
 
 PANDUAN PENULISAN INSTAGRAM (HAD KETAT: 500 HINGGA 750 AKSARA):
-1. BAHASA: 100% Bahasa Melayu santai harian komuniti PC tempatan ("Bila tengok perkongsian karya ni...", "Inspirasi terbaik untuk ruang meja kita", "Kekemasan tahap maksimum").
-2. DILARANG SAMA SEKALI menggunakan perkataan Bahasa Indonesia ("bisa", "banget", "nggak", "kamu", "anda").
-3. STRUKTUR TEKS:
-   - Fasa 1 (Hook Visual): 1 hingga 2 ayat menerangkan keunikan visual/cerita di sebalik topik Reddit ini dan selitkan mood waktu sekarang.
-   - Fasa 2 (Poin Ibrah / Kelebihan): Senaraikan TEPAT 2 poin ulasan/tips praktikal menggunakan simbol bullet point (•).
-   - Fasa 3 (Seruan Tindakan / CTA): Ajak pengikut untuk komen dan simpan (save) post ini untuk rujukan setup mereka.
-4. ARAHAN PANTANGAN KETAT:
+1. BAHASA: 100% Bahasa Melayu santai harian komuniti PC tempatan ("Bila tengok perkongsian karya ni...", "Inspirasi terbaik untuk ruang meja kita", "Kekemasan tahap maksimum", "Memang layan tengok detail ni").
+2. DILARANG SAMA SEKALI menggunakan perkataan Bahasa Indonesia ("bisa", "banget", "nggak", "ngak", "gimana", "komputer jinjing", "ponsel", "kamu", "anda").
+3. STRUKTUR VISUAL NARRATIVE (BEBAS DARI TEMPLAT KAKU):
+   - Hook Visual: Kaitkan keunikan gambar/projek Reddit ini dengan mood waktu sekarang (pagi/petang/malam).
+   - Intipati Estetika & Nilai Praktikal: Ceritakan apa yang membuatkan karya atau perkongsian ini menarik (susun atur wayar, konsep warna, kepuasan DIY, atau penyelesaian kreatif). Tulis secara mengalir dalam 2 hingga 3 perenggan pendek yang sedap dibaca di Instagram. JANGAN terikat dengan format bullet point wajib.
+   - Seruan Interaksi (CTA): Ajak pengikut untuk kongsi pandangan di ruangan komen dan simpan (save post) untuk rujukan setup mereka nanti.
+4. PANTANGAN KETAT:
    - DILARANG letak sebarang pautan URL di dalam teks.
-   - DILARANG tulis proses pemikiran, analisis draf, atau mukadimah AI (DILARANG tulis "Caption Instagram:").
-   - TERUS TULIS AYAT KANDUNGAN. Panjang teks keseluruhan (termasuk hashtags) WAJIB di antara 500 hingga 750 aksara.
+   - DILARANG letak mukadimah AI (DILARANG tulis "Berikut adalah...", "Caption Instagram:", dsb.).
+   - TERUS TULIS AYAT KANDUNGAN. Panjang teks keseluruhan (termasuk hashtags) WAJIB berada dalam julat 500 hingga 750 aksara.
 """
 
         user_prompt = f"""
@@ -287,7 +287,7 @@ Topik Reddit r/{subreddit}:
 - Tajuk Pos: {clean_title}
 - Intipati Kisah/Visual: {cleaned_text[:500] if cleaned_text else 'Perkongsian visual perkakasan, reka bentuk meja, atau modding menarik.'}
 
-Hasilkan 1 kapsyen Instagram lengkap (500 - 750 aksara):
+Hasilkan 1 kapsyen Instagram visual storytelling yang hidup dan estetik (500 - 750 aksara):
 """
 
         models_queue = [m for m in [self.model_primary, self.model_fallback] if m]

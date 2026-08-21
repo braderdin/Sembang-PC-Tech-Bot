@@ -4,10 +4,10 @@ Reddit Tech Storyteller Engine: Step 1 & Step 2 (Pipeline Runner)
 Lokasi Fail: bin/run_reddit_prepare_and_generate.py
 
 Ciri-ciri Penambahbaikan (Tuned):
-1. Dinamik 100% (Sifar Hardcode Model): Mengutamakan pembacaan REDDIT_OPENROUTER_MODEL dan REDDIT_OPENROUTER_MODEL_FALLBACK sebelum fallback am OPENROUTER_MODEL.
-2. Resolusi Imej Kalis Glitch: Menyalurkan model dinamik ke enjin resolusi imej hibrid tanpa sebarang teks hardcoded.
-3. Penjanaan Kapsyen 4 Platform Berperingkat: Melaksanakan pacing sela masa (rate-limit pacing) bagi memastikan kuota percuma OpenRouter tidak terbeban.
-4. Struktur Pertukaran Data JSON Bersih: Menyimpan seluruh hasil penapisan, imej, dan teks AI ke 'temp/reddit_payload.json'.
+1. Sifar Hardcode 100%: Membaca REDDIT_OPENROUTER_MODEL, OPENROUTER_MODEL serta model fallback secara telus dari persekitaran.
+2. Strategi 3x Percubaan Imej Asli Reddit: Mengutamakan sehingga 3 pos bergambar asli Reddit yang sah sebelum membenarkan fallback Unsplash.
+3. Penapisan Dedup Berlapis: Menyemak Upstash Redis (Exact ID, 30 Hari) dan Upstash Vector DB (Keserupaan Semantik >= 80%, 72 Jam).
+4. Penjanaan Kapsyen AI Persona Berpacing: Menjana teks 4 platform (FB, Threads, IG, Bluesky) secara bersiri dengan kawalan had kadar.
 """
 
 import os
@@ -16,15 +16,14 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 
-# 1. Konfigurasi Laluan Projek & Environment
+# 1. Konfigurasi Laluan Projek & Persekitaran
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Baca .env.local (tempatan) atau persekitaran GitHub Actions
 env_local = PROJECT_ROOT / ".env.local"
 if env_local.exists():
     load_dotenv(dotenv_path=env_local)
@@ -35,7 +34,7 @@ else:
 from src.reddit_fetcher import fetch_all_reddit_candidates, get_current_myt_context
 from src.reddit_redis_filter import is_reddit_post_processed
 from src.reddit_vector_filter import is_similar_reddit_story_posted
-from src.reddit_image_engine import resolve_reddit_story_image
+from src.reddit_image_engine import verify_image_accessibility, resolve_reddit_story_image
 from src.reddit_fb_Ai_persona import reddit_fb_ai
 from src.reddit_thread_Ai_persona import reddit_threads_ai
 from src.reddit_instagram_Ai_persona import reddit_instagram_ai
@@ -52,14 +51,13 @@ def ensure_temp_dir():
 
 def select_best_reddit_candidate() -> Optional[Dict[str, Any]]:
     """
-    Menjalankan proses pemilihan dan penapisan calon pos Reddit:
-    - Menarik calon pos daripada subreddit sasaran harian.
-    - Menapis melalui Upstash Redis (ID Post) & Upstash Vector DB (Keserupaan Teks).
-    - Mengesahkan atau mendapatkan imej yang sah (Reddit / Unsplash Anti-Face).
+    Menjalankan pemilihan calon pos Reddit dengan strategi:
+    - Mengutamakan 3 percubaan berturut-turut bagi pos yang mempunyai imej asli Reddit yang sah.
+    - Sekiranya ketiga-tiga pos bergambar gagal/tidak boleh diakses, beralih kepada pos terbaik berikutnya menggunakan fallback Unsplash (Anti-Face).
     """
     print("\n🔍 [STEP 1] Memulakan Pemilihan & Penapisan Calon Pos Reddit...")
 
-    # Baca kunci konfigurasi secara dinamik tanpa nilai hardcoded
+    # Membaca konfigurasi dinamik tanpa hardcode
     base_url = (os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").strip().rstrip("/")
     model = (
         os.getenv("REDDIT_OPENROUTER_MODEL", "").strip()
@@ -82,9 +80,82 @@ def select_best_reddit_candidate() -> Optional[Dict[str, Any]]:
 
     print(f"✅ {fetch_msg}")
     print(f"🕒 Sesi Semasa: {temporal_ctx['slot_label']} -> {temporal_ctx['theme_name']}")
-    print(f"📋 Mengimbas {len(candidates)} calon pos merentasi penapis keselamatan...\n")
+    print(f"📋 Memulakan saringan ke atas {len(candidates)} calon pos...\n")
 
-    for idx, post in enumerate(candidates, 1):
+    # Asingkan calon: Bergambar Asli vs Teks Sahaja
+    image_candidates = [c for c in candidates if c.get("has_direct_image") and c.get("image_url")]
+    text_candidates = [c for c in candidates if not (c.get("has_direct_image") and c.get("image_url"))]
+
+    # =========================================================================
+    # FASA 1: UTAMAKAN 3x PERCUBAAN POS BERGAMBAR ASLI REDDIT
+    # =========================================================================
+    reddit_img_attempts = 0
+    max_img_attempts = 3
+
+    print(f"📸 [FASA 1] Mengimbas pos dengan imej asli Reddit (Maksimum {max_img_attempts} percubaan)...")
+
+    for post in image_candidates:
+        if reddit_img_attempts >= max_img_attempts:
+            print(f"⚠️ [FASA 1 TAMAT] Had {max_img_attempts}x percubaan imej Reddit dicapai tanpa pilihan berjaya.")
+            break
+
+        p_id = str(post.get("post_id", "")).strip()
+        title = str(post.get("title", "")).strip()
+        sub = str(post.get("subreddit", "")).strip()
+        clean_text = str(post.get("cleaned_text", "")).strip()
+        score = post.get("score", 0)
+        img_url = post.get("image_url", "")
+
+        if not p_id or not title:
+            continue
+
+        reddit_img_attempts += 1
+        print(f"\n  🎯 [Percubaan Imej {reddit_img_attempts}/{max_img_attempts}]: r/{sub} - \"{title[:45]}...\" (ID: {p_id})")
+
+        # 1. Semak Upstash Redis Dedup (30 Hari)
+        if is_reddit_post_processed(p_id):
+            print(f"     ⏭️ [REDIS SKIP] Post ID '{p_id}' pernah dipos dalam tempoh 30 hari.")
+            continue
+
+        # 2. Semak Upstash Vector DB Dedup (72 Jam / 80% Kemiripan)
+        semantic_sample = f"{title} {clean_text}"[:800]
+        if is_similar_reddit_story_posted(semantic_sample):
+            print(f"     ⏭️ [VECTOR SKIP] Topik ini mirip (>=80%) dengan hantaran < 72 jam lepas.")
+            continue
+
+        # 3. Sahkan Kebolehcapaian Imej Reddit Asli
+        ok_img, status_code, img_msg = verify_image_accessibility(img_url)
+        if not ok_img:
+            print(f"     ⚠️ [IMEJ GAGAL] URL imej Reddit tidak sah (Status {status_code}): {img_msg}")
+            continue
+
+        print(f"     ✅ [IMEJ REDDIT SAH] Menggunakan imej asal Reddit: {img_url}")
+
+        return {
+            "post_id": p_id,
+            "subreddit": sub,
+            "title": title,
+            "cleaned_text": clean_text,
+            "author": post.get("author", "Anonymous"),
+            "score": score,
+            "permalink": post.get("permalink", ""),
+            "picture_url": img_url,
+            "image_source": "REDDIT_DIRECT",
+            "image_description": title,
+            "temporal_context": temporal_ctx
+        }
+
+    # =========================================================================
+    # FASA 2: FALLBACK UNSPLASH (ANTI-FACE) JIKA SEMUA PERCUBAAN GAMBAR GAGAL
+    # =========================================================================
+    print("\n" + "-" * 70)
+    print("🛡️ [FASA 2] Beralih kepada calon terbaik berikutnya dengan enjin Unsplash Fallback...")
+    print("-" * 70)
+
+    # Gabungkan baki calon yang belum dinilai
+    remaining_candidates = [c for c in candidates if c not in image_candidates[:reddit_img_attempts]]
+
+    for idx, post in enumerate(remaining_candidates, 1):
         p_id = str(post.get("post_id", "")).strip()
         title = str(post.get("title", "")).strip()
         sub = str(post.get("subreddit", "")).strip()
@@ -94,21 +165,19 @@ def select_best_reddit_candidate() -> Optional[Dict[str, Any]]:
         if not p_id or not title:
             continue
 
-        print(f"  🔍 [{idx}/{len(candidates)}] Menilai: r/{sub} - \"{title[:45]}...\" (ID: {p_id})")
+        print(f"  🔍 [Fallback {idx}/{len(remaining_candidates)}] Menilai: r/{sub} - \"{title[:45]}...\" (ID: {p_id})")
 
-        # A. Semak Penapis Upstash Redis (Exact Match ID - 30 Hari TTL)
         if is_reddit_post_processed(p_id):
-            print(f"     ⏭️ [REDIS SKIP] Post ID '{p_id}' pernah dipos dalam tempoh 30 hari.")
+            print(f"     ⏭️ [REDIS SKIP] Post ID '{p_id}' pernah dipos.")
             continue
 
-        # B. Semak Penapis Upstash Vector DB (Kemiripan Semantik >= 80% / 72 Jam)
-        semantic_text_sample = f"{title} {clean_text}"[:800]
-        if is_similar_reddit_story_posted(semantic_text_sample):
-            print(f"     ⏭️ [VECTOR SKIP] Topik pos ini mirip (>= 80%) dengan hantaran < 72 jam lepas.")
+        semantic_sample = f"{title} {clean_text}"[:800]
+        if is_similar_reddit_story_posted(semantic_sample):
+            print(f"     ⏭️ [VECTOR SKIP] Topik mirip hantaran terdahulu.")
             continue
 
-        # C. Resolusi Imej Hibrid (Reddit Direct atau Unsplash Fallback Anti-Face)
-        print(f"     🖼️ Menyelesaikan imej visual untuk pos ini...")
+        # Dapatkan imej gantian melalui Unsplash Anti-Face Engine
+        print(f"     🖼️ Menyelesaikan imej pengganti Unsplash...")
         ok_img, img_data, img_msg = resolve_reddit_story_image(
             reddit_post=post,
             base_url=base_url,
@@ -121,13 +190,12 @@ def select_best_reddit_candidate() -> Optional[Dict[str, Any]]:
         )
 
         if not ok_img or not img_data.get("image_url"):
-            print(f"     ⏭️ [IMAGE FAILED SKIP] {img_msg}")
+            print(f"     ⏭️ [UNSPLASH FAILED] {img_msg}")
             continue
 
-        print(f"     ✅ [IMEJ DISAHKAN] Sumber: {img_data.get('source')} | URL: {img_data.get('image_url')}")
+        print(f"     ✅ [IMEJ UNSPLASH SAH] Sumber: {img_data.get('source')} | Keyword: {img_data.get('keyword_used')}")
 
-        # Calon Lulus Kesemua Tapisan!
-        selected_story = {
+        return {
             "post_id": p_id,
             "subreddit": sub,
             "title": title,
@@ -141,35 +209,21 @@ def select_best_reddit_candidate() -> Optional[Dict[str, Any]]:
             "temporal_context": temporal_ctx
         }
 
-        print("\n" + "=" * 70)
-        print(f"🎯 [CALON REDDIT TERPILIH]:")
-        print(f"   🆔 Post ID   : {selected_story['post_id']}")
-        print(f"   📌 Subreddit : r/{selected_story['subreddit']}")
-        print(f"   📖 Tajuk     : {selected_story['title']}")
-        print(f"   👍 Undian    : ~{selected_story['score']} Upvotes")
-        print(f"   🖼️ Imej      : {selected_story['picture_url']} ({selected_story['image_source']})")
-        print(f"   🔗 Pautan    : {selected_story['permalink']}")
-        print("=" * 70 + "\n")
-
-        return selected_story
-
     return None
 
 
 def run_preparation_and_generation():
     ensure_temp_dir()
 
-    # =========================================================================
-    # STEP 1: PEMILIHAN & PENAPISAN CALON POS
-    # =========================================================================
+    # STEP 1: Pemilihan Calon Pos Reddit
     selected_story = select_best_reddit_candidate()
 
     if not selected_story:
-        print("\n❌ [ABORT] Tiada calon pos Reddit lulus tapisan keselamatan hari ini. Aliran ditamatkan.")
+        print("\n❌ [ABORT] Tiada calon pos Reddit melepasi saringan keselamatan hari ini.")
         error_payload = {
             "status": "failed",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "reason": "Semua calon Reddit berada dalam tempoh bertenang (Redis/Vector) atau tiada imej sah."
+            "reason": "Semua calon pos Reddit dalam tempoh dedup (Redis/Vector) atau tiada imej sah diperoleh."
         }
         with open(TEMP_DIR / "reddit_fallback_debug.json", "w", encoding="utf-8") as f:
             json.dump(error_payload, f, indent=2)
@@ -177,23 +231,29 @@ def run_preparation_and_generation():
 
     temporal_ctx = selected_story.get("temporal_context", get_current_myt_context())
 
-    # =========================================================================
-    # STEP 2: PENJANAAN KAPSYEN AI PERSONA MERENTAS 4 PLATFORM
-    # =========================================================================
     print("\n" + "=" * 70)
-    print("🤖 [STEP 2] MENJANA KAPSYEN AI PERSONA 'ABANG DIN' MENGIKUT PLATFORM")
+    print(f"🎯 [CALON REDDIT TERPILIH]:")
+    print(f"   🆔 Post ID   : {selected_story['post_id']}")
+    print(f"   📌 Subreddit : r/{selected_story['subreddit']}")
+    print(f"   📖 Tajuk     : {selected_story['title']}")
+    print(f"   👍 Undian    : ~{selected_story['score']} Upvotes")
+    print(f"   🖼️ Imej      : {selected_story['picture_url']} ({selected_story['image_source']})")
+    print(f"   🔗 Pautan    : {selected_story['permalink']}")
     print("=" * 70)
 
-    # A. Facebook Page Feed (500 - 750 Aksara)
+    # STEP 2: Penjanaan Kapsyen AI Persona Merentasi 4 Platform
+    print("\n🤖 [STEP 2] MENJANA KAPSYEN AI PERSONA 'ABANG DIN' MENGIKUT PLATFORM")
+    print("=" * 70)
+
+    # 1. Facebook Page Feed (500 - 750 Aksara)
     print("\n🔵 [1/4] Menjana Kapsyen Facebook Page Feed...")
     _, fb_caption = reddit_fb_ai.generate_caption(selected_story, temporal_ctx)
     print("--- [PREVIEW FACEBOOK STORY] ---")
     print(fb_caption)
 
-    # Jeda masa keselamatan bagi mengelakkan had kadar (rate-limit pacing)
-    time.sleep(3)
+    time.sleep(3)  # Kawalan had kadar (rate-limit pacing)
 
-    # B. Meta Threads Feed (Had Siling <= 480 Aksara)
+    # 2. Meta Threads Feed (<= 480 Aksara)
     print("\n🧵 [2/4] Menjana Kapsyen Meta Threads Feed...")
     _, threads_caption = reddit_threads_ai.generate_caption(selected_story, temporal_ctx)
     print("--- [PREVIEW THREADS STORY] ---")
@@ -201,7 +261,7 @@ def run_preparation_and_generation():
 
     time.sleep(3)
 
-    # C. Instagram Feed (500 - 750 Aksara)
+    # 3. Instagram Feed (500 - 750 Aksara)
     print("\n📸 [3/4] Menjana Kapsyen Instagram Feed...")
     _, ig_caption = reddit_instagram_ai.generate_caption(selected_story, temporal_ctx)
     print("--- [PREVIEW INSTAGRAM STORY] ---")
@@ -209,15 +269,13 @@ def run_preparation_and_generation():
 
     time.sleep(3)
 
-    # D. Bluesky Social Feed (Had Siling <= 295 Aksara)
+    # 4. Bluesky Social Feed (<= 295 Aksara)
     print("\n🦋 [4/4] Menjana Kapsyen Bluesky Social Feed...")
     _, bluesky_caption = reddit_bluesky_ai.generate_caption(selected_story, temporal_ctx)
     print("--- [PREVIEW BLUESKY STORY] ---")
     print(bluesky_caption)
 
-    # =========================================================================
-    # STEP 3: BINA DAN SIMPAN PAYLOAD SEMENTARA
-    # =========================================================================
+    # STEP 3: Simpan Hasil ke Payload Sementara
     payload_data = {
         "post_id": selected_story["post_id"],
         "subreddit": selected_story["subreddit"],
@@ -250,7 +308,7 @@ def run_preparation_and_generation():
 
     print("\n" + "=" * 70)
     print(f"💾 [SAVED] Fail payload sementara berjaya dicipta di: {PAYLOAD_FILE}")
-    print("🎉 [STEP 1 & STEP 2 SELESAI] Bersedia untuk proses pemposan modular media sosial!")
+    print("🎉 [STEP 1 & STEP 2 SELESAI] Bersedia untuk langkah pemposan media sosial!")
     print("=" * 70 + "\n")
 
 

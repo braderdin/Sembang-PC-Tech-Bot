@@ -4,10 +4,9 @@ Reddit Tech Storyteller Engine: Hybrid Image Engine & Anti-Face Filter
 Lokasi Fail: src/reddit_image_engine.py
 
 Ciri-ciri Penambahbaikan (Tuned):
-1. Dinamik 100% (Sifar Hardcode Model): Membaca REDDIT_OPENROUTER_MODEL, REDDIT_OPENROUTER_MODEL_FALLBACK, dan fallback am OPENROUTER_MODEL.
-2. Penyingkiran Penalti Inferens: Membuang parameter presence_penalty dan frequency_penalty untuk keserasian optimum model Gemma 4 & pelayan percuma OpenRouter.
-3. Penghurai JSON Kebal Glitch: Menggunakan pembersih regex teguh yang membuang blok pemikiran (<think>...</think>) dan mengekstrak elemen JSON Array secara selamat tanpa ralat JSON decode.
-4. Tapisan Anti-Wajah (Unsplash 40-Pool): Menapis imej berwajah manusia serta menyemak penapis duplikasi Upstash Redis.
+1. Dinamik 100% (Sifar Hardcode): Membaca model primer dan fallback secara telus daripada persekitaran (REDDIT_OPENROUTER_MODEL, OPENROUTER_MODEL).
+2. Pengesahan Ketat Imej Asal Reddit: Mengesahkan kebolehcapaian URL, jenis MIME imej, saiz fail, dan normalisasi entiti URL imej Reddit.
+3. Unsplash Sebagai Pelan Kecemasan (Last Resort): Hanya diaktifkan apabila tiada imej Reddit yang sah, lengkap dengan penjanaan kata kunci AI bertingkat, penapisan anti-wajah manusia, dan semakan dedup Redis 30 hari.
 """
 
 import os
@@ -15,6 +14,7 @@ import re
 import json
 import time
 import random
+import html
 import requests
 from typing import Dict, Any, Optional, Tuple, List
 
@@ -48,28 +48,44 @@ SAFE_TECH_KEYWORDS = [
 
 
 # =============================================================================
-# 2. PENGESAHAN CAPAIAN IMEJ REDDIT
+# 2. PENGESAHAN CAPAIAN IMEJ REDDIT & NORMALISASI URL
 # =============================================================================
+def sanitize_image_url(url: str) -> str:
+    """Membersihkan entiti HTML yang terlepas di dalam URL imej Reddit."""
+    if not url:
+        return ""
+    clean = html.unescape(url).strip()
+    clean = clean.replace("&amp;", "&")
+    return clean
+
+
 def verify_image_accessibility(image_url: str) -> Tuple[bool, int, str]:
     """
     Memastikan URL imej boleh diakses oleh perayap media sosial (HTTP 200),
     mempunyai jenis MIME imej yang sah, dan saiz fail mencukupi (> 1KB).
     """
-    if not image_url or not image_url.startswith("http"):
+    clean_url = sanitize_image_url(image_url)
+    if not clean_url or not clean_url.startswith("http"):
         return False, 0, "URL imej kosong atau tidak sah."
 
     headers = {
-        "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+        "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
     }
 
     try:
-        res = requests.get(image_url, headers=headers, timeout=12, stream=True)
+        res = requests.get(clean_url, headers=headers, timeout=12, stream=True, allow_redirects=True)
         if res.status_code != 200:
             return False, res.status_code, f"HTTP {res.status_code}"
 
         content_type = res.headers.get("Content-Type", "").lower()
-        if not any(t in content_type for t in ["image/jpeg", "image/png", "image/webp", "image/jpg"]):
-            return False, res.status_code, f"MIME bukan imej ({content_type})"
+        valid_mimes = ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/gif", "image/avif"]
+        
+        if not any(t in content_type for t in valid_mimes):
+            # Jika MIME generic seperti octet-stream, semak kandungan bait awal
+            sample_bytes = res.raw.read(1024)
+            if len(sample_bytes) < 500:
+                return False, res.status_code, f"MIME bukan imej sah ({content_type})"
 
         content_length = int(res.headers.get("Content-Length", 0))
         if content_length == 0:
@@ -140,7 +156,7 @@ def extract_json_array_robust(text: str) -> List[str]:
         except Exception:
             pass
 
-    # 3. Fallback Regex jika JSON decode gagal akibat koma/tanda petik rosak
+    # 3. Fallback Regex jika JSON decode gagal
     fallback_matches = re.findall(r'["\']([a-zA-Z0-9\s]{3,35})["\']', clean_text)
     cleaned_fallback = []
     for item in fallback_matches:
@@ -178,21 +194,20 @@ You are a Visual Director for Tech Media.
 Your task: Read the Reddit topic and generate EXACTLY 10 visual search keywords for Unsplash in English (2 to 3 words each).
 
 RULES:
-1. Short, aesthetic, hardware/desk/gadget/tech oriented (e.g. "mechanical keyboard", "server cable room", "minimalist desk setup", "smartwatch design", "dark coding room").
-2. DO NOT include personal names or rare obscure brands.
-3. OUTPUT FORMAT: JSON Array of 10 strings ONLY. No conversational intro.
+1. Short, aesthetic, hardware/desk/gadget/tech oriented (e.g. "mechanical keyboard desk", "server cable room", "minimalist desk setup", "custom pc mod", "dark coding room").
+2. DO NOT include personal names, memes, or obscure brand names.
+3. OUTPUT FORMAT: JSON Array of 10 strings ONLY. No conversational text.
 ["keyword 1", "keyword 2", ..., "keyword 10"]
 """
 
     user_prompt = f"""
 Reddit Topic:
 - Title: {title[:120]}
-- Summary: {cleaned_text[:350] if cleaned_text else 'Technology community discussion'}
+- Summary: {cleaned_text[:350] if cleaned_text else 'Technology community discussion and hardware showcase'}
 
 Generate JSON Array with 10 Unsplash keywords:
 """
 
-    # Model dinamik mengikut keutamaan konfigurasi env
     primary_m = (
         model
         or os.getenv("REDDIT_OPENROUTER_MODEL", "").strip()
@@ -227,7 +242,7 @@ Generate JSON Array with 10 Unsplash keywords:
                 if extracted_keywords:
                     return extracted_keywords
             elif res.status_code == 429:
-                print(f"⚠️ [IMAGE AI 429] Model '{selected_model}' sesak. Mencuba model seterusnya...")
+                print(f"⚠️ [IMAGE AI 429] Model '{selected_model}' sesak. Mencuba model sandaran...")
                 time.sleep(2)
         except Exception as e:
             print(f"⚠️ [IMAGE AI EXCEPTION]: {e}")
@@ -262,9 +277,7 @@ def is_photo_face_free(photo_data: Dict[str, Any]) -> Tuple[bool, str]:
 
 
 def fetch_unsplash_images(keyword: str, access_key: str, count: int = 40) -> List[Dict[str, Any]]:
-    """
-    Membuat 1 panggilan ke Unsplash API untuk menarik sehingga 40 gambar bertema.
-    """
+    """Membuat 1 panggilan ke Unsplash API untuk menarik sehingga 40 gambar bertema."""
     if not access_key:
         return []
 
@@ -365,32 +378,40 @@ def resolve_reddit_story_image(
 ) -> Tuple[bool, Dict[str, Any], str]:
     """
     Pintu Utama Resolusi Imej:
-    - Langkah 1: Semak imej asal Reddit. Jika sah, terus gunakan.
-    - Langkah 2: Jika tiada imej Reddit, jana 10 kata kunci AI, pilih 1 terbaik,
-      tarik 40 gambar dari Unsplash, dan pilih 1 imej paling serasi.
+    - Langkah 1: Semak dan sahkan imej asal Reddit secara tegas. Jika sah, terus gunakan.
+    - Langkah 2 (Emergency Fallback Sahaja): Jika tiada imej Reddit yang sah,
+      jana kata kunci AI dan pilih imej terbaik daripada Unsplash 40-Pool (Anti-Face).
     """
     raw_reddit_img = reddit_post.get("image_url")
     title = reddit_post.get("title", "Sembang PC Tech")
     cleaned_text = reddit_post.get("cleaned_text", "")
 
     # -------------------------------------------------------------------------
-    # ALIRAN 1: PENGESAHAN IMEJ ASAL REDDIT
+    # ALIRAN 1: PENGESAHAN KETAT IMEJ ASAL REDDIT
     # -------------------------------------------------------------------------
     if raw_reddit_img:
-        is_ok, _, msg = verify_image_accessibility(raw_reddit_img)
+        clean_img_url = sanitize_image_url(raw_reddit_img)
+        is_ok, status_code, msg = verify_image_accessibility(clean_img_url)
         if is_ok:
             return True, {
                 "source": "REDDIT_DIRECT",
-                "image_url": raw_reddit_img,
+                "image_url": clean_img_url,
                 "photo_id": str(reddit_post.get("post_id", "reddit_direct")),
                 "description": title,
                 "keyword_used": "reddit_original"
             }, "Menggunakan imej asal Reddit yang disahkan."
+        else:
+            print(f"⚠️ [REDDIT IMAGE UNREACHABLE] URL imej Reddit gagal disahkan ({status_code}): {msg}")
 
     # -------------------------------------------------------------------------
-    # ALIRAN 2: FALLBACK ENJIN UNSPLASH (ANTI-FACE + AI 10-KEYWORD ENGINE)
+    # ALIRAN 2: PELAN KECEMASAN UNSPLASH FALLBACK (ANTI-FACE ENGINE)
     # -------------------------------------------------------------------------
-    # 1. AI jana 10 calon kata kunci visual
+    print("🛡️ [IMAGE FALLBACK ENGINE] Mengaktifkan pelan kecemasan Unsplash...")
+
+    if not unsplash_key:
+        return False, {}, "Kunci UNSPLASH_ACCESS_KEY tiada dalam persekitaran."
+
+    # 1. AI jana 10 kata kunci visual
     keywords_10 = generate_10_visual_keywords(
         title=title,
         cleaned_text=cleaned_text,
@@ -400,33 +421,38 @@ def resolve_reddit_story_image(
         api_key=api_key
     )
 
-    # 2. Gunakan kata kunci teratas (paling relevan)
-    chosen_keyword = keywords_10[0] if keywords_10 else random.choice(SAFE_TECH_KEYWORDS)
+    # 2. Cuba sehingga 3 kata kunci teratas
+    for kw_idx, keyword_candidate in enumerate(keywords_10[:3], 1):
+        print(f"  🔍 [Unsplash Query {kw_idx}/3]: Mencari gambar bagi '{keyword_candidate}'...")
+        photos_40 = fetch_unsplash_images(keyword_candidate, unsplash_key, count=40)
+        
+        if photos_40:
+            selected_img = select_best_matching_image(
+                photos=photos_40,
+                article_title=title,
+                article_text=cleaned_text,
+                keyword_used=keyword_candidate,
+                redis_url=redis_url,
+                redis_token=redis_token
+            )
+            if selected_img:
+                return True, selected_img, f"Imej Unsplash dipilih bagi kata kunci '{keyword_candidate}'."
 
-    # 3. Tarik kelompok 40 gambar dari Unsplash API
-    photos_40 = fetch_unsplash_images(chosen_keyword, unsplash_key, count=40)
+    # 3. Ikhtiar terakhir: Tema sandaran rawak selamat
+    emergency_keyword = random.choice(SAFE_TECH_KEYWORDS)
+    print(f"  🛡️ [Unsplash Emergency]: Mencari kelompok selamat '{emergency_keyword}'...")
+    photos_emergency = fetch_unsplash_images(emergency_keyword, unsplash_key, count=40)
 
-    # Jika kata kunci pertama tiada hasil, cuba kata kunci kedua
-    if not photos_40 and len(keywords_10) > 1:
-        chosen_keyword = keywords_10[1]
-        photos_40 = fetch_unsplash_images(chosen_keyword, unsplash_key, count=40)
-
-    # Jika masih tiada, cuba tema sandaran selamat
-    if not photos_40:
-        chosen_keyword = random.choice(SAFE_TECH_KEYWORDS)
-        photos_40 = fetch_unsplash_images(chosen_keyword, unsplash_key, count=40)
-
-    # 4. Tapis anti-wajah, semak Redis, dan pilih 1 gambar terbaik
-    selected_img = select_best_matching_image(
-        photos=photos_40,
+    selected_emergency_img = select_best_matching_image(
+        photos=photos_emergency,
         article_title=title,
         article_text=cleaned_text,
-        keyword_used=chosen_keyword,
+        keyword_used=emergency_keyword,
         redis_url=redis_url,
         redis_token=redis_token
     )
 
-    if selected_img:
-        return True, selected_img, f"Imej Unsplash dipilih bagi kata kunci '{chosen_keyword}'."
+    if selected_emergency_img:
+        return True, selected_emergency_img, f"Imej Unsplash kecemasan dipilih bagi '{emergency_keyword}'."
 
-    return False, {}, "Gagal mendapatkan imej daripada Reddit mahupun Unsplash."
+    return False, {}, "Gagal mendapatkan imej yang sah daripada Reddit mahupun Unsplash."

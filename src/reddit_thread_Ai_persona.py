@@ -4,10 +4,11 @@ Reddit Tech Storyteller Engine: Meta Threads AI Persona Module
 Lokasi Fail: src/reddit_thread_Ai_persona.py
 
 Ciri-ciri Penambahbaikan (Tuned):
-1. Dinamik 100% (Sifar Hardcode Model): Membaca REDDIT_OPENROUTER_MODEL, REDDIT_OPENROUTER_MODEL_FALLBACK, dan fallback am OPENROUTER_MODEL daripada persekitaran.
-2. Penapis Anti-Thinking & Reasoning Scrubber: Membuang tag <think>...</think>, perenggan analisis draf (e.g. "Here's a thinking process"), dan token LLM rosak secara agresif.
-3. Penyingkiran Penalti Inferens: Membuang parameter presence_penalty dan frequency_penalty untuk keserasian optimum pelayan Gemma 4 di OpenRouter.
-4. Kawalan Had Siling Ketat (<= 480 Aksara): Menjamin mikro-blog padat, spontan, dan berbisa tanpa terpotong di Meta Threads.
+1. Mikro-Blog Spontan & Bernyawa: Menghapuskan nada kaku skema templat dan memberi ruang ulasan spontan, reaksi santai, atau celoteh tech Abang Din yang mencuit hati di Meta Threads.
+2. Dinamik 100% (Sifar Hardcode Model): Membaca REDDIT_OPENROUTER_MODEL, REDDIT_OPENROUTER_MODEL_FALLBACK, dan fallback am OPENROUTER_MODEL daripada persekitaran.
+3. Penapis Anti-Thinking & Reasoning Scrubber: Membuang tag <think>...</think>, perenggan analisis draf, dan token LLM rosak secara agresif.
+4. Penyingkiran Penalti Inferens: Membuang parameter presence_penalty dan frequency_penalty untuk keserasian optimum pelayan OpenRouter.
+5. Kawalan Had Siling Ketat (<= 480 Aksara): Menjamin mikro-blog padat, spontan, dan berbisa tanpa risiko teks terpotong di Meta Threads.
 """
 
 import os
@@ -39,7 +40,7 @@ MALAY_ANCHOR_WORDS = {
     "kita", "korang", "saya", "buat", "bila", "dengan", "pun", "rasa",
     "meja", "setup", "pc", "kerja", "santai", "tengok", "dalam", "untuk",
     "tak", "bukan", "memang", "lagi", "padu", "kemas", "hujung", "minggu",
-    "malam", "pagi", "petang", "gajet", "murah", "berbaloi", "cerita", "abang"
+    "malam", "pagi", "petang", "gajet", "murah", "berbaloi", "cerita", "abang", "layan"
 }
 
 FORBIDDEN_WORDS = {
@@ -57,13 +58,13 @@ def get_current_myt_details() -> Dict[str, Any]:
 
     hour = now.hour
     if 4 <= hour < 12:
-        slot_desc = "Pagi (Mood Produktif & Segar)"
+        slot_desc = "Pagi (Mood Produktif, Segar & Fikiran Jelas)"
     elif 12 <= hour < 17:
-        slot_desc = "Petang (Mood IT & Aliran Kerja)"
+        slot_desc = "Petang (Mood Aliran Kerja IT & Eksperimen PC)"
     elif 17 <= hour < 21:
-        slot_desc = "Malam (Mood Santai Borak Tech)"
+        slot_desc = "Malam Awal (Mood Lepak Santai Borak Tech)"
     else:
-        slot_desc = "Larut Malam (Mood Santai Kopi & Setup)"
+        slot_desc = "Larut Malam (Mood Santai Kopi, Setup Estetik & Nostalgia)"
 
     return {
         "full_date_str": f"{now.day} {month_my} {now.year}",
@@ -95,7 +96,7 @@ def clean_threads_text(text: str) -> str:
     text = re.sub(r'[\x80-\x9f]', '', text)
 
     # 3. Buang mukadimah dan header templat
-    text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption|post|threads)[^\n]*?\n+', '', text)
+    text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption|post|threads|hantaran)[^\n]*?\n+', '', text)
     text = re.sub(r'(?i)\*\*caption\s*(?:threads)?\s*:\*\*', '', text)
     text = re.sub(r'\*\*\*', '', text)
     text = re.sub(r'https?://\S+', '', text)
@@ -162,7 +163,7 @@ def is_valid_threads_caption(text: str, min_len: int = 80) -> Tuple[bool, str]:
 # 2. KELAS ENJIN AI PERSONA THREADS
 # =============================================================================
 class RedditThreadsAIPersona:
-    """Enjin AI Persona Threads khusus untuk ulasan mikro-blog santai & berbisa."""
+    """Enjin AI Persona Threads khusus untuk ulasan mikro-blog santai, spontan & berbisa."""
 
     def __init__(self):
         self.base_url = (os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").strip().rstrip("/")
@@ -175,8 +176,8 @@ class RedditThreadsAIPersona:
             or os.getenv("OPENROUTER_MODEL_FALLBACK", "").strip()
         )
         self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-        self.temperature = 0.65
-        self.max_tokens = 400
+        self.temperature = 0.7
+        self.max_tokens = 450
         self.cooldown_delay = 3.5
 
     def _call_llm_api(self, model_name: str, system_prompt: str, user_prompt: str) -> Tuple[bool, Optional[str], str]:
@@ -232,7 +233,7 @@ class RedditThreadsAIPersona:
 
     def generate_caption(self, post_data: Dict[str, Any], temporal_ctx: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """
-        Menjana kapsyen mikro-blog Threads (Had Siling <= 480 Aksara)
+        Menjana kapsyen mikro-blog Threads yang hidup dan bersahaja (Had Siling <= 480 Aksara)
         dengan kawalan masa Malaysia dan model failover.
         """
         raw_title = str(post_data.get("title") or "Topik PC Pilihan").strip()
@@ -244,45 +245,46 @@ class RedditThreadsAIPersona:
         formatted_time = time_info.get("formatted_context", "Waktu Malaysia (MYT)")
 
         hashtags_block = "\n\n#SembangPCTech #TechMY"
-        max_body_allowed = 480 - len(hashtags_block) - 5  # ~450 aksara untuk teks
+        max_body_allowed = 480 - len(hashtags_block) - 5
 
         fallback_body = (
-            f"Tengok perkongsian daripada komuniti r/{subreddit} ni pasal {clean_title[:35]}, memang kreatif betul idea dorang. "
-            f"Kadang benda simple macam ni yang buat setup kita rasa lain macam kepuasannya. "
-            f"Korang pernah cuba buat modding kreatif macam ni tak kat setup sendiri?"
+            f"Tengok perkongsian daripada komuniti r/{subreddit} ni pasal {clean_title[:35]}, memang kreatif betul cara dia solve masalah setup. "
+            f"Benda-benda detail macam ni yang selalu buat kita rasa gatal tangan nak troubleshoot atau mod meja sendiri. "
+            f"Korang pernah try idea pelik macam ni kat rig sendiri tak?"
         )
-        fallback_full = f"{fallback_body}{hashtags_block}".strip()
+        fallback_full = f"{fallback_body[:max_body_allowed]}{hashtags_block}".strip()
 
         if not self.api_key:
             print("⚠️ [THREADS AI WARN] Kunci OpenRouter tiada. Mengaktifkan kapsyen sandaran.")
             return True, fallback_full[:480]
 
         system_prompt = f"""
-Anda ialah "Abang Din" di Meta Threads untuk "Sembang PC & Tech Malaysia".
-Format: MIKRO-BLOG SPONTAN (Ringkas, Padat, Santai, dan Berbisa).
+Anda ialah "Abang Din" di Meta Threads untuk saluran @SembangPCTech Malaysia.
+Format: MIKRO-BLOG SPONTAN & BERSAHAJA (Bercakap terus dengan audiens, ada rasa ingin tahu, humor santai, dan jiwa peminat PC tempatan).
 
 MAKLUMAT MASA SEMASA (MALAYSIA):
 {formatted_time}
 
 PANDUAN PENULISAN THREADS (HAD KETAT KESELURUHAN <= 450 AKSARA):
-1. BAHASA: 100% Bahasa Melayu santai harian komuniti PC/tech tempatan ("Tengok perkongsian ni...", "Korang rasa berbaloi ke...", "Padu teruk idea ni").
-2. DILARANG SAMA SEKALI menggunakan perkataan Bahasa Indonesia ("bisa", "banget", "nggak", "kamu", "anda").
-3. STRUKTUR:
-   - 2 hingga 3 ayat mengulas topik Reddit dengan reaksi spontan & bersahaja.
-   - Akhiri dengan 1 soalan santai untuk memancing interaksi dan komen pengikut Threads.
-4. ARAHAN PANTANGAN KETAT:
+1. GAYA BAHASA: 100% Bahasa Melayu santai komuniti tech tempatan ("Tengok idea ni...", "Gatal tangan rasa nak try...", "Korang rasa berbaloi ke buat macam ni?").
+2. DILARANG SAMA SEKALI menggunakan perkataan Bahasa Indonesia ("bisa", "banget", "nggak", "ngak", "gimana", "komputer jinjing", "ponsel", "kamu", "anda").
+3. STRUKTUR SPONTAN (BEBAS & TIDAK BERULANG):
+   - Tulis 2 hingga 4 ayat penceritaan ringkas mengulas keunikan, lawak, atau kehebatan topik Reddit ini.
+   - Boleh menyelitkan sedikit bebelan manja, rasa kagum, atau nostalgia Abang Din.
+   - Akhiri dengan 1 soalan bersahaja untuk memancing komen pengikut Threads.
+4. PANTANGAN KETAT:
    - DILARANG letak link/URL.
-   - DILARANG tulis proses pemikiran, analisis draf, atau sebarang teks sebelum ayat mikro-blog.
-   - TERUS TULIS AYAT KANDUNGAN tanpa mukadimah AI.
-   - Had panjang teks badan WAJIB di antara 150 hingga 380 aksara sahaja.
+   - DILARANG letak mukadimah AI (DILARANG tulis "Berikut adalah...", "Post Threads:", dsb.).
+   - TERUS TULIS AYAT KANDUNGAN.
+   - Had panjang teks badan WAJIB berada di antara 150 hingga 380 aksara sahaja (sebelum ditambah hashtag).
 """
 
         user_prompt = f"""
 Topik Reddit r/{subreddit}:
 - Tajuk: {clean_title}
-- Kisah: {cleaned_text[:300] if cleaned_text else 'Kongsian inovasi visual perkakasan/setup'}
+- Ringkasan Kisah/Visual: {cleaned_text[:300] if cleaned_text else 'Kongsian inovasi visual perkakasan/setup'}
 
-Tulis 1 hantaran mikro Threads spontan (Maksimum 380 aksara badan):
+Tulis 1 hantaran mikro Threads yang spontan, bersahaja dan hidup (150 - 380 aksara badan):
 """
 
         models_queue = [m for m in [self.model_primary, self.model_fallback] if m]

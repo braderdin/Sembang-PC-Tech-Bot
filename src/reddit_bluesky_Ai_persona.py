@@ -4,10 +4,11 @@ Reddit Tech Storyteller Engine: Bluesky Social AI Persona Module
 Lokasi Fail: src/reddit_bluesky_Ai_persona.py
 
 Ciri-ciri Penambahbaikan (Tuned):
-1. Dinamik 100% (Sifar Hardcode Model): Membaca REDDIT_OPENROUTER_MODEL, REDDIT_OPENROUTER_MODEL_FALLBACK, dan fallback am OPENROUTER_MODEL secara telus daripada persekitaran.
-2. Penyingkiran Penalti Inferens: Membuang parameter presence_penalty dan frequency_penalty untuk menjamin kestabilan model Gemma 4 di pelayan percuma OpenRouter.
-3. Penapis Anti-Thinking & Reasoning Scrubber: Membuang tag <think>...</think>, perenggan analisis draf, mojibake, dan token LLM rosak secara agresif.
-4. Had Siling Ketat (<= 295 Aksara): Mengukuhkan persona Abang Din untuk menghasilkan anekdot tech padat, tajam, dan santai (Sasaran Selamat: 240 – 285 Aksara).
+1. Anekdot Spontan & Tajam (Punchy Tech Reaction): Menghapuskan nada templat kaku dan memberi kebebasan reaksi bersahaja, komen pedas/lucu, atau intipati padat Abang Din di Bluesky Social.
+2. Dinamik 100% (Sifar Hardcode Model): Membaca REDDIT_OPENROUTER_MODEL, REDDIT_OPENROUTER_MODEL_FALLBACK, dan fallback am OPENROUTER_MODEL secara telus daripada persekitaran.
+3. Penyingkiran Penalti Inferens: Membuang parameter presence_penalty dan frequency_penalty untuk kestabilan optimum pelayan OpenRouter.
+4. Penapis Anti-Thinking & Reasoning Scrubber: Membuang tag <think>...</think>, perenggan analisis draf AI, mojibake, dan token LLM rosak secara agresif.
+5. Had Siling Ketat (<= 295 Aksara): Memastikan hantaran anekdot padat, bersahaja dan sentiasa mematuhi had siling teknikal Bluesky.
 """
 
 import os
@@ -38,7 +39,7 @@ MALAY_ANCHOR_WORDS = {
     "yang", "dan", "di", "ke", "kat", "ni", "tu", "dah", "nak", "ada",
     "kita", "korang", "saya", "buat", "bila", "dengan", "pun", "rasa",
     "meja", "setup", "pc", "kerja", "santai", "tengok", "dalam", "untuk",
-    "tak", "bukan", "memang", "lagi", "padu", "kemas", "gajet", "berbaloi"
+    "tak", "bukan", "memang", "lagi", "padu", "kemas", "gajet", "berbaloi", "abang"
 }
 
 FORBIDDEN_WORDS = {
@@ -81,7 +82,7 @@ def clean_bluesky_text(text: str) -> str:
     text = re.sub(r'[\x80-\x9f]', '', text)
 
     # 3. Buang mukadimah dan header templat
-    text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption|post|bluesky)[^\n]*?\n+', '', text)
+    text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption|post|bluesky|hantaran)[^\n]*?\n+', '', text)
     text = re.sub(r'(?i)\*\*caption\s*(?:bluesky)?\s*:\*\*', '', text)
     text = re.sub(r'\*\*\*', '', text)
     text = re.sub(r'https?://\S+', '', text)
@@ -161,7 +162,7 @@ class RedditBlueskyAIPersona:
             or os.getenv("OPENROUTER_MODEL_FALLBACK", "").strip()
         )
         self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-        self.temperature = 0.65
+        self.temperature = 0.7
         self.max_tokens = 250
         self.cooldown_delay = 3.5
 
@@ -218,7 +219,7 @@ class RedditBlueskyAIPersona:
 
     def generate_caption(self, post_data: Dict[str, Any], temporal_ctx: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """
-        Menjana kapsyen Bluesky Feed yang padat dan tajam (Maksimum TEGAS <= 295 aksara).
+        Menjana kapsyen Bluesky Feed yang padat, spontan dan tajam (Maksimum TEGAS <= 295 aksara).
         """
         raw_title = str(post_data.get("title") or "Topik PC Pilihan").strip()
         clean_title = re.sub(r'\s+', ' ', raw_title)[:70].strip()
@@ -232,8 +233,8 @@ class RedditBlueskyAIPersona:
         max_body_allowed = 290 - len(hashtags_block)  # ~260 aksara untuk teks
 
         fallback_body = (
-            f"Kreatif betul perkongsian komuniti r/{subreddit} pasal {clean_title[:35]} ni. "
-            f"Bila tech jumpa seni dan modding, memang lain macam hasilnya!"
+            f"Kreatif betul projek r/{subreddit} pasal {clean_title[:35]} ni. "
+            f"Bila tech jumpa modding berseni macam ni, memang puas mata memandang!"
         )
         fallback_full = f"{fallback_body[:max_body_allowed]}{hashtags_block}".strip()
 
@@ -242,21 +243,21 @@ class RedditBlueskyAIPersona:
             return True, fallback_full[:295]
 
         system_prompt = f"""
-Anda ialah "Abang Din" di Bluesky Social untuk "Sembang PC & Tech Malaysia".
-Format: ANEKDOT TECH SANGAT PADAT: Terus ke inti pati cerita, tajam, padu, dan santai.
+Anda ialah "Abang Din" di Bluesky Social untuk saluran @SembangPCTech Malaysia.
+Format: ANEKDOT TECH PADAT & TAJAM (Punchy, bersahaja, berjiwa peminat PC tempatan, tanpa mukadimah skema).
 
 MAKLUMAT MASA SEMASA (MALAYSIA):
 {formatted_time}
 
 PANDUAN PENULISAN BLUESKY (HAD KETAT: 100 HINGGA 180 AKSARA UNTUK BADAN TEKS):
-1. BAHASA: 100% Bahasa Melayu santai komuniti tech tempatan.
-2. DILARANG SAMA SEKALI menggunakan perkataan Bahasa Indonesia ("bisa", "banget", "nggak", "kamu", "anda").
-3. STRUKTUR:
-   - Nyatakan 1 inti pati menarik daripada topik Reddit ini dengan pantas dan santai.
-4. ARAHAN PANTANGAN KETAT:
-   - DILARANG letak link URL atau hashtag di dalam respon AI (hashtag dipasang secara automatik).
-   - DILARANG tulis proses pemikiran, analisis draf, atau mukadimah AI.
-   - TERUS TULIS AYAT KANDUNGAN tanpa mukadimah.
+1. BAHASA: 100% Bahasa Melayu santai harian komuniti tech tempatan.
+2. DILARANG SAMA SEKALI menggunakan perkataan Bahasa Indonesia ("bisa", "banget", "nggak", "ngak", "gimana", "komputer jinjing", "ponsel", "kamu", "anda").
+3. STRUKTUR SPONTAN:
+   - Terus lontarkan reaksi, intipati menarik, atau ulasan bersahaja mengenai projek/isu Reddit ini (1 hingga 2 ayat padu).
+4. PANTANGAN KETAT:
+   - DILARANG letak link URL atau hashtag di dalam teks AI (hashtag dipasang secara automatik).
+   - DILARANG letak mukadimah AI (DILARANG tulis "Post Bluesky:", "Berikut adalah...", dsb.).
+   - TERUS TULIS AYAT KANDUNGAN.
 """
 
         user_prompt = f"""
@@ -264,7 +265,7 @@ Topik Reddit r/{subreddit}:
 - Tajuk: {clean_title}
 - Ringkasan: {cleaned_text[:200] if cleaned_text else 'Kongsian inovasi perkakasan tech'}
 
-Tulis 1 ulasan pantas Bluesky (100 - 180 aksara sahaja):
+Tulis 1 reaksi ringkas dan bernyawa untuk Bluesky (100 - 180 aksara badan):
 """
 
         models_queue = [m for m in [self.model_primary, self.model_fallback] if m]

@@ -3,12 +3,11 @@
 Reddit Tech Storyteller Engine: Reddit Ingestion & Temporal Context Module
 Lokasi Fail: src/reddit_fetcher.py
 
-Fungsi Utama:
-1. Mengesan Waktu Piawai Malaysia (MYT / UTC+8) dan menentukan slot siaran (Pagi vs Malam).
-2. Memilih kelompok subreddit mengikut matriks tema 7 hari (Weekly Theme Matrix).
-3. Dual-Engine Ingestion: Mencuba JSON API terlebih dahulu; jika disekat (HTTP 403), beralih secara automatik ke RSS/Atom Feed XML.
-4. Menapis pos NSFW, pos sematan moderator (stickied), dan pos yang dipadam.
-5. Mengekstrak pautan media imej asli (i.redd.it, imgur, galeri) serta membersihkan teks penceritaan.
+Ciri-ciri Penambahbaikan:
+1. Pengekstrakan Imej Pintar: Menyokong URL langsung, pratonton Reddit (raw_json), dan galeri media_metadata Reddit.
+2. Keutamaan Mutlak Imej Reddit (Primary Weight): Menyusun 100% pos bergambar asli Reddit di senarai teratas.
+3. Skor Kurasi Emosi & Penglibatan (Curation Score): Menilai tajuk berasaskan kata kunci cerita sebenar (DIY, fail, upgrade, fix, setup) dan aktiviti komuniti.
+4. Dual-Engine Ingestion (JSON API + RSS XML Fallback) dengan pembersihan teks teguh.
 """
 
 import os
@@ -77,6 +76,12 @@ NAMA_BULAN_MALAY = {
     1: "Januari", 2: "Februari", 3: "Mac", 4: "April",
     5: "Mei", 6: "Jun", 7: "Julai", 8: "Ogos",
     9: "September", 10: "Oktober", 11: "November", 12: "Disember"
+}
+
+STORY_HOOK_KEYWORDS = {
+    "finally", "built", "setup", "first time", "upgrade", "after years",
+    "custom", "project", "fixed", "fail", "disaster", "cable", "clean",
+    "mod", "battlestation", "desk", "deskmat", "diy", "restored", "saved"
 }
 
 
@@ -159,11 +164,39 @@ def clean_reddit_text(raw_text: str, max_chars: int = 2500) -> str:
     return cleaned
 
 
+def calculate_editorial_score(post_dict: Dict[str, Any]) -> float:
+    """
+    Mengira markah kurasi editorial berdasarkan elemen cerita manusia sebenar:
+    - Penglibatan komuniti (skor + komen)
+    - Kata kunci emosi / penceritaan setup di dalam tajuk
+    - Kepadatan teks perbincangan
+    """
+    base_score = float(post_dict.get("score", 0))
+    comments_bonus = float(post_dict.get("num_comments", 0)) * 3.5
+    title = str(post_dict.get("title", "")).lower()
+    text = str(post_dict.get("cleaned_text", ""))
+
+    # Bonus kata kunci penceritaan menarik
+    hook_matches = sum(1 for kw in STORY_HOOK_KEYWORDS if re.search(r'\b' + re.escape(kw) + r'\b', title))
+    hook_bonus = hook_matches * 60.0
+
+    # Bonus panjang teks (optimum 80 - 600 patah perkataan)
+    text_len = len(text)
+    if 80 <= text_len <= 800:
+        text_bonus = 80.0
+    elif text_len > 800:
+        text_bonus = 40.0
+    else:
+        text_bonus = 0.0
+
+    return base_score + comments_bonus + hook_bonus + text_bonus
+
+
 # =============================================================================
 # 3. ENJIN 1: PENGAMBILAN DATA JSON (BROWSER HEADERS)
 # =============================================================================
-def fetch_via_json(subreddit: str, listing: str = "hot", limit: int = 20) -> Tuple[bool, List[Dict[str, Any]], str]:
-    """Menarik data pos menggunakan JSON API Reddit."""
+def fetch_via_json(subreddit: str, listing: str = "hot", limit: int = 25) -> Tuple[bool, List[Dict[str, Any]], str]:
+    """Menarik data pos menggunakan JSON API Reddit dengan pengekstrakan galeri/imej menyeluruh."""
     clean_sub = subreddit.replace("r/", "").strip()
     endpoint = f"https://www.reddit.com/r/{clean_sub}/{listing}.json?limit={limit}&raw_json=1"
 
@@ -200,32 +233,46 @@ def fetch_via_json(subreddit: str, listing: str = "hot", limit: int = 20) -> Tup
             author = p.get("author", "")
             post_id = p.get("id", "")
             url = p.get("url", "")
+            post_hint = p.get("post_hint", "")
 
             if over_18 or is_pinned or not title or author in ["[deleted]", "AutoModerator"]:
                 continue
 
-            # Pengekstrakan Imej Langsung
+            # 1. Ekstrak Imej Terus (Single Image / Preview / Gallery)
             image_url = None
             if url and any(url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"]):
                 image_url = url
+            elif "i.redd.it" in url or "i.imgur.com" in url:
+                image_url = url
+            elif p.get("is_gallery") and "media_metadata" in p:
+                media_meta = p.get("media_metadata", {})
+                for _, m_val in media_meta.items():
+                    if m_val.get("status") == "valid" and "s" in m_val and "u" in m_val["s"]:
+                        image_url = html.unescape(m_val["s"]["u"])
+                        break
             elif "preview" in p and "images" in p["preview"] and len(p["preview"]["images"]) > 0:
-                image_url = p["preview"]["images"][0].get("source", {}).get("url")
+                raw_preview_url = p["preview"]["images"][0].get("source", {}).get("url")
+                if raw_preview_url:
+                    image_url = html.unescape(raw_preview_url)
 
             clean_body = clean_reddit_text(selftext)
 
-            candidates.append({
+            candidate_dict = {
                 "post_id": post_id,
                 "subreddit": clean_sub,
                 "title": title,
                 "cleaned_text": clean_body,
                 "image_url": image_url,
-                "has_direct_image": image_url is not None,
+                "has_direct_image": image_url is not None and len(str(image_url).strip()) > 10,
                 "score": score,
                 "num_comments": comments,
                 "author": author,
                 "permalink": f"https://www.reddit.com{p.get('permalink', '')}",
                 "source_engine": "JSON_API"
-            })
+            }
+
+            candidate_dict["curation_score"] = calculate_editorial_score(candidate_dict)
+            candidates.append(candidate_dict)
 
         return True, candidates, f"JSON: Berjaya menarik {len(candidates)} pos"
     except Exception as e:
@@ -279,28 +326,32 @@ def fetch_via_rss(subreddit: str, listing: str = "hot") -> Tuple[bool, List[Dict
             img_match = re.search(r'href="([^"]+\.(?:jpg|jpeg|png|webp))"', raw_html, re.I)
             if not img_match:
                 img_match = re.search(r'src="([^"]+\.(?:jpg|jpeg|png|webp))"', raw_html, re.I)
+            if not img_match:
+                img_match = re.search(r'href="(https?://i\.redd\.it/[^"]+)"', raw_html, re.I)
+
             if img_match:
                 image_url = html.unescape(img_match.group(1))
 
             # 2. Ekstrak & Bersihkan Teks
             clean_body = clean_reddit_text(raw_html)
-
-            # Anggaran skor ranking kedudukan
             estimated_score = max(500 - (index * 20), 50)
 
-            candidates.append({
+            candidate_dict = {
                 "post_id": post_id,
                 "subreddit": clean_sub,
                 "title": title,
                 "cleaned_text": clean_body,
                 "image_url": image_url,
-                "has_direct_image": image_url is not None,
+                "has_direct_image": image_url is not None and len(str(image_url).strip()) > 10,
                 "score": estimated_score,
                 "num_comments": 25,
                 "author": author,
                 "permalink": permalink,
                 "source_engine": "RSS_XML_FEED"
-            })
+            }
+
+            candidate_dict["curation_score"] = calculate_editorial_score(candidate_dict)
+            candidates.append(candidate_dict)
 
         return True, candidates, f"RSS Feed: Berjaya mengekstrak {len(candidates)} pos"
     except Exception as e:
@@ -326,7 +377,9 @@ def fetch_subreddit_hybrid(subreddit: str) -> Tuple[bool, List[Dict[str, Any]], 
 def fetch_all_reddit_candidates() -> Tuple[bool, List[Dict[str, Any]], Dict[str, Any], str]:
     """
     Mengumpul semua calon pos daripada senarai subreddit sasaran harian
-    dan menyusunnya mengikut kualiti kandungan untuk ditapis oleh pipeline.
+    dan menyusunnya mengikut keutamaan mutlak:
+    1. Mempunyai imej asli Reddit (has_direct_image == True) sentiasa di atas.
+    2. Disusun mengikut skor kurasi editorial (curation_score) berasaskan penglibatan & hook cerita.
     """
     context = get_current_myt_context()
     target_subs = context["target_subreddits"]
@@ -340,10 +393,23 @@ def fetch_all_reddit_candidates() -> Tuple[bool, List[Dict[str, Any]], Dict[str,
     if not collected_candidates:
         return False, [], context, "Tiada calon pos berjaya diekstrak daripada semua subreddit sasaran."
 
-    # Susun keutamaan: Pos dengan imej langsung & teks panjang diutamakan
+    # Susunan Keutamaan Mutlak:
+    # 1. Pos berimej terus Reddit (1) vs Teks sahaja (0)
+    # 2. Skor kurasi editorial (curation_score)
+    # 3. Markah upvote mentah (score)
     collected_candidates.sort(
-        key=lambda x: (x["has_direct_image"], len(x["cleaned_text"]), x["score"]),
+        key=lambda x: (
+            1 if x.get("has_direct_image") else 0,
+            x.get("curation_score", 0),
+            x.get("score", 0)
+        ),
         reverse=True
     )
 
-    return True, collected_candidates, context, f"Berjaya mengumpul {len(collected_candidates)} calon pos."
+    image_count = sum(1 for c in collected_candidates if c.get("has_direct_image"))
+    return (
+        True,
+        collected_candidates,
+        context,
+        f"Berjaya mengumpul {len(collected_candidates)} calon pos ({image_count} berimej Reddit)."
+    )
