@@ -2,10 +2,8 @@ name: 🤖 Reddit Tech Storyteller Feed Auto-Poster
 
 on:
   schedule:
-    # 08:15 AM & 08:15 PM (Waktu Malaysia - MYT / UTC+8)
-    # 08:15 AM MYT -> 00:15 UTC
-    # 08:15 PM MYT -> 12:15 UTC
-    - cron: '15 0,12 * * *'
+    # 08:15 AM 01:15 PM & 08:15 PM (Waktu Malaysia - MYT / UTC+8)
+    - cron: '15 0,5,12 * * *'
   workflow_dispatch:        # Butang manual trigger dari tab Actions di GitHub
 
 jobs:
