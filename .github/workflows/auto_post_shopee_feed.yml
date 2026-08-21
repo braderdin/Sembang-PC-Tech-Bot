@@ -12,10 +12,10 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Python Environment
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -27,9 +27,12 @@ jobs:
 
       - name: Step 1 & 2 - Prepare Shopee Product & Generate AI Captions
         env:
-          # OpenRouter AI Persona Engine
+          # OpenRouter AI Persona Engine (Shopee Dedicated & General Fallback)
           OPENROUTER_BASE_URL: ${{ secrets.OPENROUTER_BASE_URL }}
+          SHOPEE_OPENROUTER_MODEL: ${{ secrets.SHOPEE_OPENROUTER_MODEL }}
+          SHOPEE_OPENROUTER_MODEL_FALLBACK: ${{ secrets.SHOPEE_OPENROUTER_MODEL_FALLBACK }}
           OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
+          OPENROUTER_MODEL_FALLBACK: ${{ secrets.OPENROUTER_MODEL_FALLBACK }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
           # Supabase Database Backend
@@ -69,6 +72,12 @@ jobs:
           INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
           META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+
+          # Backblaze B2 Storage (Signed Ingestion for Instagram Image Bridge)
+          B2_ACC1_KEY_ID: ${{ secrets.B2_ACC1_KEY_ID }}
+          B2_ACC1_APPLICATION_KEY: ${{ secrets.B2_ACC1_APPLICATION_KEY }}
+          B2_ACC1_BUCKET_ID: ${{ secrets.B2_ACC1_BUCKET_ID }}
+          B2_ACC1_BUCKET_NAME: ${{ secrets.B2_ACC1_BUCKET_NAME }}
         run: |
           python bin/run_shopee_post_instagram.py
 

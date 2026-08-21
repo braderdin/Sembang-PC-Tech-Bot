@@ -6,7 +6,7 @@ Pipeline Runner:
 2. Filter through Redis (30 Days TTL) & Vector DB (80% Similarity / 3 Days).
 3. Validate Image URL CDN accessibility & Content-Type for Meta Graph API.
 4. Fallback up to 5 batches if all candidates in current batch are filtered out.
-5. Generate AI Captions for 4 platforms (FB, Threads, IG, Bluesky).
+5. Generate AI Captions for 4 platforms (FB, Threads, IG, Bluesky) with pacing delay.
 6. Save structured payload to 'temp/shopee_payload.json'.
 """
 
@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import json
+import time
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
@@ -236,7 +237,7 @@ def run_preparation_and_generation():
             json.dump(error_payload, f, indent=2)
         sys.exit(1)
 
-    # 2. STEP 2: JANA AYAT AI PERSONA BAGI KESEMUA 4 PLATFORM
+    # 2. STEP 2: JANA AYAT AI PERSONA BAGI KESEMUA 4 PLATFORM (DENGAN PACING DELAY)
     print("\n" + "=" * 70)
     print("🤖 [STEP 2] MENJANA KAPSYEN AI PERSONA MENGIKUT PLATFORM (SHOPEE)")
     print("=" * 70)
@@ -247,17 +248,26 @@ def run_preparation_and_generation():
     print("--- [PREVIEW FACEBOOK CAPTION] ---")
     print(fb_caption)
 
+    # Jeda keselamatan untuk mengelakkan burst rate limit (HTTP 429)
+    time.sleep(3)
+
     # B. Threads Persona
     print("\n🧵 Menjana Kapsyen Threads Feed (Hard Limit <= 480 Aksara)...")
     _, threads_caption = shopee_threads_ai.generate_caption(selected_product)
     print("--- [PREVIEW THREADS CAPTION] ---")
     print(threads_caption)
 
+    # Jeda keselamatan untuk mengelakkan burst rate limit (HTTP 429)
+    time.sleep(3)
+
     # C. Instagram & Pinterest Persona
     print("\n📸 Menjana Kapsyen Instagram & Pinterest Feed (350 - 450 Aksara)...")
     _, ig_caption = shopee_instagram_ai.generate_caption(selected_product)
     print("--- [PREVIEW INSTAGRAM CAPTION] ---")
     print(ig_caption)
+
+    # Jeda keselamatan untuk mengelakkan burst rate limit (HTTP 429)
+    time.sleep(3)
 
     # D. Bluesky Persona
     print("\n🦋 Menjana Kapsyen Bluesky Feed (Hard Limit <= 295 Aksara)...")

@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import requests
 from typing import Dict, Any, Optional, Tuple
 
@@ -40,22 +41,25 @@ def clean_glitches_and_meta(text: str) -> str:
     if not text:
         return ""
 
-    # 1. Buang token khas LLM
+    # 1. Buang tag pemikiran reasoning model AI
+    text = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE)
+
+    # 2. Buang token khas LLM
     text = re.sub(r'<pad>|<unk>|<s>|</s>|\[PAD\]|\[UNK\]|<\|.*?\|>', '', text, flags=re.IGNORECASE)
 
-    # 2. Standardkan bullet points
+    # 3. Standardkan bullet points
     for sym in ["❖", "◆", "◇", "►", "▪", "▲", "★", "➡", "➢", "*"]:
         text = text.replace(sym, "•")
 
-    # 3. Buang teks pembuka / penutup AI
+    # 4. Buang teks pembuka / penutup AI
     text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption)[^\n]*?\n+', '', text)
     text = re.sub(r'(?i)\*\*caption\s*(?:facebook)?\s*:\*\*', '', text)
     text = re.sub(r'\*\*\*', '', text)
 
-    # 4. Tapis aksara bukan Rumi jika berlaku glitch model
+    # 5. Tapis aksara bukan Rumi jika berlaku glitch model
     text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\s.,!?:;\'"()/\-#@+•]', '', text)
 
-    # 5. Susun baris perenggan
+    # 6. Susun baris perenggan
     lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
     return "\n".join([line for line in lines if line]).strip()
 
@@ -113,12 +117,70 @@ class ShopeeFBAIPersona:
 
     def __init__(self):
         self.base_url = (os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").strip().rstrip("/")
-        self.model = os.getenv("OPENROUTER_MODEL", "").strip()
+        self.model_primary = (
+            os.getenv("SHOPEE_OPENROUTER_MODEL", "").strip()
+            or os.getenv("OPENROUTER_MODEL", "").strip()
+        )
+        self.model_fallback = (
+            os.getenv("SHOPEE_OPENROUTER_MODEL_FALLBACK", "").strip()
+            or os.getenv("OPENROUTER_MODEL_FALLBACK", "").strip()
+        )
         self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+
+    def _call_llm_api(self, model_name: str, system_prompt: str, user_prompt: str) -> Tuple[bool, Optional[str], str]:
+        """Memanggil endpoint OpenRouter API dengan mekanisme auto-backoff rehat jika terkena 429/503."""
+        if not self.base_url or not self.api_key or not model_name:
+            return False, None, "Konfigurasi OpenRouter (Base URL, API Key, Model) tidak lengkap."
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json; charset=utf-8",
+            "HTTP-Referer": "https://sembangpctech.local",
+            "X-Title": "Sembang PC & Tech Bot",
+        }
+
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt.strip()},
+                {"role": "user", "content": user_prompt.strip()},
+            ],
+            "temperature": 0.68,
+            "max_tokens": 600,
+        }
+
+        url = f"{self.base_url}/chat/completions"
+
+        for attempt in range(2):
+            try:
+                res = requests.post(url, json=payload, headers=headers, timeout=25)
+                res.encoding = "utf-8"
+
+                if res.status_code in [429, 502, 503]:
+                    wait_sec = 6 * (attempt + 1)
+                    print(f"  ⚠️ [FB AI {res.status_code}] Model '{model_name}' sesak/rehat. Menunggu {wait_sec}s...")
+                    time.sleep(wait_sec)
+                    continue
+
+                if res.status_code == 200:
+                    data = res.json()
+                    if "choices" in data and len(data["choices"]) > 0:
+                        content = data["choices"][0]["message"]["content"].strip()
+                        return True, content, "Berjaya"
+                else:
+                    err_snippet = res.text[:120]
+                    print(f"  ⚠️ [FB AI HTTP {res.status_code}]: {err_snippet}")
+                    time.sleep(2)
+
+            except Exception as e:
+                print(f"  ⚠️ [FB AI EXCEPTION]: {e}")
+                time.sleep(2)
+
+        return False, None, f"Gagal mendapatkan respon daripada model {model_name}"
 
     def generate_caption(self, product_data: Dict[str, Any]) -> Tuple[bool, str]:
         """
-        Menjana kapsyen Facebook Feed (500 - 700 Aksara) dengan mekanisme 3x retry.
+        Menjana kapsyen Facebook Feed (500 - 700 Aksara) dengan mekanisme failover & retry.
         Memulangkan: (success_bool, caption_text)
         """
         raw_title = str(product_data.get("shopee_product_name") or product_data.get("title") or "Gajet Pilihan").strip()
@@ -140,16 +202,9 @@ class ShopeeFBAIPersona:
             f"#SembangPCTech #TechMalaysia #PCSetup #RacunGajet #ShopeeMY"
         )
 
-        if not self.base_url or not self.model or not self.api_key:
+        if not self.base_url or not self.api_key:
             print("⚠️ [FB AI WARN] Kunci OpenRouter tidak lengkap, menggunakan kapsyen sandaran.")
             return True, fallback_caption
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json; charset=utf-8",
-            "HTTP-Referer": "https://sembangpctech.local",
-            "X-Title": "Sembang PC & Tech Bot",
-        }
 
         user_prompt = f"""
 Sila hasilkan 1 kapsyen Facebook ulasan santai gaya Sembang PC & Tech Malaysia (500 - 700 aksara) untuk produk ini:
@@ -161,46 +216,28 @@ Sila hasilkan 1 kapsyen Facebook ulasan santai gaya Sembang PC & Tech Malaysia (
 Peringatan: JANGAN letak sebarang link. Pastikan ayat CTA ruangan komen disertakan di akhir ayat.
 """
 
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT.strip()},
-                {"role": "user", "content": user_prompt.strip()},
-            ],
-            "temperature": 0.68,
-            "max_tokens": 600,
-        }
+        models_queue = [m for m in [self.model_primary, self.model_fallback] if m]
+        if not models_queue:
+            print("⚠️ [FB AI WARN] Tiada model OpenRouter dikonfigurasi, menggunakan kapsyen sandaran.")
+            return True, fallback_caption
 
-        url = f"{self.base_url}/chat/completions"
+        for model_idx, current_model in enumerate(models_queue, 1):
+            print(f"🤖 [FB AI GENERATION] Mencuba Model {model_idx}/{len(models_queue)}: '{current_model}'...")
+            ok_call, raw_content, msg = self._call_llm_api(current_model, SYSTEM_PROMPT, user_prompt)
 
-        # Mekanisme 3x Percubaan (Retry)
-        for attempt in range(3):
-            try:
-                print(f"🤖 [FB AI GENERATION] Menjana kapsyen Facebook (Percubaan {attempt + 1}/3)...")
-                res = requests.post(url, json=payload, headers=headers, timeout=25)
-                res.encoding = "utf-8"
+            if ok_call and raw_content:
+                cleaned_content = clean_glitches_and_meta(raw_content)
+                final_caption = smart_trim_fb_text(cleaned_content, max_chars=700)
 
-                if res.status_code == 200:
-                    data = res.json()
-                    if "choices" in data and len(data["choices"]) > 0:
-                        raw_content = data["choices"][0]["message"]["content"].strip()
-                        cleaned_content = clean_glitches_and_meta(raw_content)
-                        final_caption = smart_trim_fb_text(cleaned_content, max_chars=700)
-
-                        if is_valid_fb_caption(final_caption):
-                            # Pastikan ayat CTA komen wujud
-                            if "komen pertama" not in final_caption.lower():
-                                final_caption += "\n\n👉 Pautan belian rasmi Shopee abang dah sediakan di ruangan komen pertama di bawah ya! 👇"
-                            
-                            print(f"✅ [FB AI SUCCESS] Kapsyen Facebook berjaya dijana ({len(final_caption)} aksara).")
-                            return True, final_caption
-                        else:
-                            print(f"⚠️ [FB AI GLITCH] Teks tidak menepati syarat kualiti pada percubaan {attempt + 1}. Mencuba semula...")
+                if is_valid_fb_caption(final_caption):
+                    # Pastikan ayat CTA komen wujud
+                    if "komen pertama" not in final_caption.lower():
+                        final_caption += "\n\n👉 Pautan belian rasmi Shopee abang dah sediakan di ruangan komen pertama di bawah ya! 👇"
+                    
+                    print(f"✅ [FB AI SUCCESS] Kapsyen Facebook berjaya dijana ({len(final_caption)} aksara | Model: '{current_model}').")
+                    return True, final_caption
                 else:
-                    print(f"⚠️ [FB AI HTTP ERROR] HTTP {res.status_code}: {res.text}")
-
-            except Exception as e:
-                print(f"⚠️ [FB AI EXCEPTION - ATTEMPT {attempt + 1}]: {str(e)}")
+                    print(f"⚠️ [FB AI GLITCH] Teks tidak menepati syarat kualiti untuk model '{current_model}'.")
 
         print("🛡️ [FB AI FALLBACK] Mengaktifkan kapsyen Facebook sandaran bersih.")
         return True, fallback_caption

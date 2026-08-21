@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import requests
 from typing import Dict, Any, Optional, Tuple
 
@@ -35,22 +36,25 @@ def clean_threads_text(text: str) -> str:
     if not text:
         return ""
 
-    # 1. Buang token khas LLM
+    # 1. Buang tag pemikiran reasoning model AI
+    text = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE)
+
+    # 2. Buang token khas LLM
     text = re.sub(r'<pad>|<unk>|<s>|</s>|\[PAD\]|\[UNK\]|<\|.*?\|>', '', text, flags=re.IGNORECASE)
 
-    # 2. Buang simbol mojibake / glitch encoding
+    # 3. Buang simbol mojibake / glitch encoding
     text = re.sub(r'[ðâ][\x80-\xbf]{1,4}', '', text)
     text = re.sub(r'[\x80-\x9f]', '', text)
 
-    # 3. Buang mukadimah pembantu AI
+    # 4. Buang mukadimah pembantu AI
     text = re.sub(r'(?i)^\s*(?:yo|hai|salam|hello)?[^\n]*?(?:cadangan|kapsyen|caption)[^\n]*?\n+', '', text)
     text = re.sub(r'(?i)\*\*caption\s*(?:threads)?\s*:\*\*', '', text)
     text = re.sub(r'\*\*\*', '', text)
 
-    # 4. Tapis aksara bukan Rumi jika berlaku glitch
+    # 5. Tapis aksara bukan Rumi jika berlaku glitch
     text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\s.,!?:;\'"()/\-#@+•]', '', text)
 
-    # 5. Susun baris perenggan
+    # 6. Susun baris perenggan
     lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
     return "\n".join([line for line in lines if line]).strip()
 
@@ -107,8 +111,66 @@ class ShopeeThreadsAIPersona:
 
     def __init__(self):
         self.base_url = (os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").strip().rstrip("/")
-        self.model = os.getenv("OPENROUTER_MODEL", "").strip()
+        self.model_primary = (
+            os.getenv("SHOPEE_OPENROUTER_MODEL", "").strip()
+            or os.getenv("OPENROUTER_MODEL", "").strip()
+        )
+        self.model_fallback = (
+            os.getenv("SHOPEE_OPENROUTER_MODEL_FALLBACK", "").strip()
+            or os.getenv("OPENROUTER_MODEL_FALLBACK", "").strip()
+        )
         self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+
+    def _call_llm_api(self, model_name: str, system_prompt: str, user_prompt: str) -> Tuple[bool, Optional[str], str]:
+        """Memanggil endpoint OpenRouter API dengan mekanisme auto-backoff rehat jika terkena 429/503."""
+        if not self.base_url or not self.api_key or not model_name:
+            return False, None, "Konfigurasi OpenRouter (Base URL, API Key, Model) tidak lengkap."
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json; charset=utf-8",
+            "HTTP-Referer": "https://sembangpctech.local",
+            "X-Title": "Sembang PC & Tech Bot",
+        }
+
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt.strip()},
+                {"role": "user", "content": user_prompt.strip()},
+            ],
+            "temperature": 0.68,
+            "max_tokens": 300,
+        }
+
+        url = f"{self.base_url}/chat/completions"
+
+        for attempt in range(2):
+            try:
+                res = requests.post(url, json=payload, headers=headers, timeout=20)
+                res.encoding = "utf-8"
+
+                if res.status_code in [429, 502, 503]:
+                    wait_sec = 6 * (attempt + 1)
+                    print(f"  ⚠️ [THREADS AI {res.status_code}] Model '{model_name}' sesak/rehat. Menunggu {wait_sec}s...")
+                    time.sleep(wait_sec)
+                    continue
+
+                if res.status_code == 200:
+                    data = res.json()
+                    if "choices" in data and len(data["choices"]) > 0:
+                        content = data["choices"][0]["message"]["content"].strip()
+                        return True, content, "Berjaya"
+                else:
+                    err_snippet = res.text[:120]
+                    print(f"  ⚠️ [THREADS AI HTTP {res.status_code}]: {err_snippet}")
+                    time.sleep(2)
+
+            except Exception as e:
+                print(f"  ⚠️ [THREADS AI EXCEPTION]: {e}")
+                time.sleep(2)
+
+        return False, None, f"Gagal mendapatkan respon daripada model {model_name}"
 
     def generate_caption(self, product_data: Dict[str, Any]) -> Tuple[bool, str]:
         """
@@ -140,17 +202,10 @@ class ShopeeThreadsAIPersona:
             f"Kualiti mantap dan sangat berbaloi untuk kegunaan harian. Korang dah upgrade setup meja belum?"
         )
 
-        if not self.base_url or not self.model or not self.api_key:
+        if not self.base_url or not self.api_key:
             print("⚠️ [THREADS AI WARN] Kunci OpenRouter tidak lengkap, menggunakan kapsyen sandaran.")
             full_text = f"{fallback_body}{footer}".strip()
             return True, full_text[:480]
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json; charset=utf-8",
-            "HTTP-Referer": "https://sembangpctech.local",
-            "X-Title": "Sembang PC & Tech Bot",
-        }
 
         user_prompt = f"""
 Sila buatkan 1 hantaran mikro-blog Threads santai gaya Sembang PC & Tech (180 - 240 aksara sahaja) untuk produk ini:
@@ -161,49 +216,31 @@ Sila buatkan 1 hantaran mikro-blog Threads santai gaya Sembang PC & Tech (180 - 
 Peringatan: JANGAN letak pautan/link. Akhiri dengan 1 soalan santai untuk interaksi pembaca.
 """
 
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT.strip()},
-                {"role": "user", "content": user_prompt.strip()},
-            ],
-            "temperature": 0.68,
-            "max_tokens": 300,
-        }
+        models_queue = [m for m in [self.model_primary, self.model_fallback] if m]
+        if not models_queue:
+            print("⚠️ [THREADS AI WARN] Tiada model OpenRouter dikonfigurasi, menggunakan kapsyen sandaran.")
+            full_fallback = f"{fallback_body}{footer}".strip()
+            return True, full_fallback[:480]
 
-        url = f"{self.base_url}/chat/completions"
+        for model_idx, current_model in enumerate(models_queue, 1):
+            print(f"🤖 [THREADS AI GENERATION] Mencuba Model {model_idx}/{len(models_queue)}: '{current_model}'...")
+            ok_call, raw_content, msg = self._call_llm_api(current_model, SYSTEM_PROMPT, user_prompt)
 
-        # Mekanisme 3x Percubaan (Retry)
-        for attempt in range(3):
-            try:
-                print(f"🤖 [THREADS AI GENERATION] Menjana kapsyen Threads (Percubaan {attempt + 1}/3)...")
-                res = requests.post(url, json=payload, headers=headers, timeout=20)
-                res.encoding = "utf-8"
+            if ok_call and raw_content:
+                cleaned_body = clean_threads_text(raw_content)
+                final_body = smart_trim_threads_body(cleaned_body, max_chars=max_body_allowed)
 
-                if res.status_code == 200:
-                    data = res.json()
-                    if "choices" in data and len(data["choices"]) > 0:
-                        raw_content = data["choices"][0]["message"]["content"].strip()
-                        cleaned_body = clean_threads_text(raw_content)
-                        final_body = smart_trim_threads_body(cleaned_body, max_chars=max_body_allowed)
+                if is_valid_threads_caption(final_body, min_len=40):
+                    full_post = f"{final_body}{footer}".strip()
+                    if len(full_post) > 480:
+                        excess = len(full_post) - 480
+                        final_body = smart_trim_threads_body(final_body, max_chars=len(final_body) - excess - 5)
+                        full_post = f"{final_body}{footer}".strip()
 
-                        if is_valid_threads_caption(final_body, min_len=40):
-                            full_post = f"{final_body}{footer}".strip()
-                            if len(full_post) > 480:
-                                # Jika masih terlajak, potong badan teks dengan cermat
-                                excess = len(full_post) - 480
-                                final_body = smart_trim_threads_body(final_body, max_chars=len(final_body) - excess - 5)
-                                full_post = f"{final_body}{footer}".strip()
-
-                            print(f"✅ [THREADS AI SUCCESS] Kapsyen Threads berjaya dijana ({len(full_post)}/480 aksara).")
-                            return True, full_post
-                        else:
-                            print(f"⚠️ [THREADS AI GLITCH] Teks gagal tapisan kualiti pada percubaan {attempt + 1}. Mencuba semula...")
+                    print(f"✅ [THREADS AI SUCCESS] Kapsyen Threads berjaya dijana ({len(full_post)}/480 aksara | Model: '{current_model}').")
+                    return True, full_post
                 else:
-                    print(f"⚠️ [THREADS AI HTTP ERROR] HTTP {res.status_code}: {res.text}")
-
-            except Exception as e:
-                print(f"⚠️ [THREADS AI EXCEPTION - ATTEMPT {attempt + 1}]: {str(e)}")
+                    print(f"⚠️ [THREADS AI GLITCH] Teks gagal tapisan kualiti untuk model '{current_model}'.")
 
         print("🛡️ [THREADS AI FALLBACK] Mengaktifkan kapsyen Threads sandaran bersih.")
         full_fallback = f"{fallback_body}{footer}".strip()

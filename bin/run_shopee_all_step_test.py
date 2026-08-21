@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 Shopee Auto-Poster Pipeline: Comprehensive Local Test Runner
-Executes Step 1 through Step 8 sequentially for local debugging:
-  - Step 0: Environment Variables & Connectivity Pre-flight Check
-  - Step 1 & 2: Supabase Candidate Selection & AI Caption Generation
-  - Step 3 (A-D): Multi-Platform Social Media Feed Posting (FB, Threads, IG, Bluesky)
-  - Step 4 to 8: Telegram Audit, Gatekeeper, Redis, Vector, Supabase Commit & Cleanup
+Lokasi Fail: bin/run_shopee_all_step_test.py
+
+Aliran Larian Ujian (Sequential Debugging Steps):
+- Step 0: Semakan ketersediaan pembolehubah persekitaran (.env.local) termasuk Backblaze B2 Bridge.
+- Step 1 & 2: Pemilihan produk Supabase, penapisan Redis/Vector & janaan kapsyen 4 platform AI.
+- Step 3A - 3D: Larian pemposan media sosial (Facebook Page, Meta Threads, Instagram via B2 Bridge, Bluesky).
+- Step 4 - 8: Laporan audit Telegram, semakan Safety Gatekeeper, komit kunci Redis, embedding Vector DB, kemas kini Supabase & pembersihan payload.
 """
 
 import os
@@ -46,7 +48,7 @@ def print_banner(title: str, color: str = CYAN):
     print(f"{'=' * width}{RESET}")
 
 
-def check_environment_variables():
+def check_environment_variables() -> bool:
     """Menyemak status ketersediaan semua kunci API penting sebelum memulakan ujian."""
     print_banner("STEP 0: PRE-FLIGHT ENVIRONMENT & CONFIG CHECK", YELLOW)
     
@@ -59,6 +61,7 @@ def check_environment_variables():
         "Facebook Page": ["FACEBOOK_PAGE_ID", "FACEBOOK_PAGE_ACCESS_TOKEN"],
         "Meta Threads": ["THREADS_USER_ID", "THREADS_ACCESS_TOKEN"],
         "Instagram Business": ["INSTAGRAM_ACCOUNT_ID", "INSTAGRAM_ACCESS_TOKEN"],
+        "Backblaze B2 (IG Bridge)": ["B2_ACC1_KEY_ID", "B2_ACC1_APPLICATION_KEY", "B2_ACC1_BUCKET_ID", "B2_ACC1_BUCKET_NAME"],
         "Bluesky Social": ["BLUESKY_HANDLE", "BLUESKY_APP_PASSWORD"]
     }
 
@@ -77,6 +80,14 @@ def check_environment_variables():
                     val = os.getenv("UPSTASH_REDIS_URL", "").strip()
                 elif k == "UPSTASH_REDIS_REST_TOKEN":
                     val = os.getenv("UPSTASH_API_KEY", "").strip()
+                elif k == "B2_ACC1_KEY_ID":
+                    val = os.getenv("B2_KEY_ID", "").strip()
+                elif k == "B2_ACC1_APPLICATION_KEY":
+                    val = os.getenv("B2_APPLICATION_KEY", "").strip()
+                elif k == "B2_ACC1_BUCKET_ID":
+                    val = os.getenv("B2_BUCKET_ID", "").strip()
+                elif k == "B2_ACC1_BUCKET_NAME":
+                    val = os.getenv("B2_BUCKET_NAME", "").strip()
             
             if not val:
                 missing.append(k)
@@ -161,9 +172,9 @@ def run_full_pipeline_test():
         step_results["Step 3B (Threads)"] = f"FAILED: {str(e)}"
 
     # =========================================================================
-    # STEP 3C: POSTING KE INSTAGRAM FEED
+    # STEP 3C: POSTING KE INSTAGRAM FEED VIA BACKBLAZE B2 BRIDGE
     # =========================================================================
-    print_banner("STEP 3C: INSTAGRAM FEED POSTING", CYAN)
+    print_banner("STEP 3C: INSTAGRAM FEED POSTING (VIA B2 BRIDGE)", CYAN)
     try:
         from bin.run_shopee_post_instagram import run_instagram_posting
         run_instagram_posting()

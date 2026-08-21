@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-Shopee Feed Auto-Poster: Step 3 (Instagram Module)
-Workflow Runner:
-1. Read 'temp/shopee_payload.json'.
-2. Create Instagram Single-Photo Media Container via Meta Graph API (Auto-Retry 2x).
-3. Wait for Media Container status to become FINISHED.
-4. Publish container to Instagram Professional Profile Feed.
-5. Self-Healing Verification: Auto-detect published post if Meta returns transient rate-limit warning.
-6. Retrieve Instagram Post Permalink for verification.
-7. Output 'POST ID :' and Permalink for GitHub Actions tracking.
-8. Update 'post_results.instagram' inside 'temp/shopee_payload.json'.
+Shopee Feed Auto-Poster: Step 3 (Instagram Module via Backblaze B2 Bridge)
+Lokasi Fail: bin/run_shopee_post_instagram.py
+
+Aliran Kerja (Workflow Runner):
+1. Membaca fail 'temp/shopee_payload.json'.
+2. Memuat naik fail imej Shopee ke Backblaze B2 Private Bucket dan menjana Signed Public URL
+   melalui enjin 'src/shopee_instagram_b2_image_bridge.py' bagi melepasi sekatan WAF/Geo-block CDN Shopee.
+3. Mencipta Instagram Single-Photo Media Container via Meta Graph API menggunakan Signed URL B2.
+4. Menunggu pemprosesan container menjadi FINISHED.
+5. Menerbitkan container ke suapan profil Instagram Professional.
+6. Enjin Pemulihan Kendiri (Self-Healing): Mengesan pos jika Meta memulangkan ralat transient.
+7. Memadam fail imej daripada Backblaze B2 di dalam blok 'finally' untuk mengekalkan storan 0 MB.
+8. Mengemas kini status hantaran ke 'post_results.instagram' dalam 'temp/shopee_payload.json'.
 """
 
 import os
@@ -30,6 +33,9 @@ if env_local.exists():
     load_dotenv(dotenv_path=env_local)
 else:
     load_dotenv()
+
+# 2. Import Modul Jambatan B2 dari src/
+from src.shopee_instagram_b2_image_bridge import shopee_b2_bridge
 
 PAYLOAD_FILE = PROJECT_ROOT / "temp" / "shopee_payload.json"
 GRAPH_BASE_URL = "https://graph.facebook.com/v19.0"
@@ -116,10 +122,10 @@ def check_recent_published_post(account_id: str, access_token: str, match_captio
     return False, None, None
 
 
-def post_to_instagram_feed(account_id: str, access_token: str, caption: str, image_url: str):
+def post_to_instagram_feed(account_id: str, access_token: str, caption: str, image_url: str, product_id: str = ""):
     """
-    Menerbitkan gambar ke Instagram Feed menggunakan aliran Container -> Publish
-    lengkap dengan mekanisme auto-recovery dan auto-retry 2x jika berlaku gangguan CDN/Meta.
+    Menerbitkan gambar ke Instagram Feed menggunakan aliran Backblaze B2 Bridge -> Meta Container -> Publish
+    lengkap dengan pembersihan automatik fail storan B2 di dalam blok finally.
     """
     if not account_id or not access_token:
         return False, "Kunci INSTAGRAM_ACCOUNT_ID atau INSTAGRAM_ACCESS_TOKEN tidak dijumpai."
@@ -127,18 +133,38 @@ def post_to_instagram_feed(account_id: str, access_token: str, caption: str, ima
     if not image_url or not image_url.startswith("http"):
         return False, "URL gambar tidak sah atau tidak boleh diakses."
 
-    container_url = f"{GRAPH_BASE_URL}/{account_id}/media"
-    container_payload = {
-        "image_url": image_url,
-        "caption": caption,
-        "access_token": access_token
-    }
+    target_image_url = image_url
+    bridge_data = None
+
+    # =========================================================================
+    # LANGKAH 0: AKTIFKAN BACKBLAZE B2 IMAGE BRIDGE
+    # =========================================================================
+    if shopee_b2_bridge.is_configured():
+        print("🌉 [IG B2 BRIDGE] Mengaktifkan Jambatan Backblaze B2 untuk memintas sekatan CDN Shopee...")
+        ok_bridge, b2_payload, b2_msg = shopee_b2_bridge.upload_shopee_image_to_b2(
+            image_url=image_url, product_id=product_id
+        )
+        if ok_bridge and b2_payload:
+            bridge_data = b2_payload
+            target_image_url = b2_payload.get("signed_url") or image_url
+            print(f"✅ [IG B2 BRIDGE SUCCESS] Meta akan merayap imej melalui Signed B2 Storage.")
+        else:
+            print(f"⚠️ [IG B2 BRIDGE WARN] {b2_msg}. Mencuba URL asal sebagai sandaran...")
+    else:
+        print("⚠️ [IG B2 BRIDGE SKIP] Kunci Backblaze B2 tidak lengkap. Menggunakan URL CDN terus.")
 
     try:
         # =====================================================================
         # LANGKAH 1: Cipta Media Container di Instagram API (Auto-Retry 2x)
         # =====================================================================
         print(f"📸 [IG STEP A] Membina Media Container Instagram (Panjang Teks: {len(caption)} aksara)...")
+        container_url = f"{GRAPH_BASE_URL}/{account_id}/media"
+        container_payload = {
+            "image_url": target_image_url,
+            "caption": caption,
+            "access_token": access_token
+        }
+
         creation_id = None
         last_err_a = ""
 
@@ -192,7 +218,7 @@ def post_to_instagram_feed(account_id: str, access_token: str, caption: str, ima
                 "post_url": permalink
             }
 
-        # Jika Langkah B memberi ralat (cth: 'Application request limit reached'), lakukan Self-Healing Verification
+        # Jika Langkah B memberi ralat transient, lakukan Self-Healing Verification
         err = publish_json.get("error", {})
         err_msg = err.get("message", res_publish.text)
         print(f"⚠️ [IG PUBLISH NOTICE] Respon Meta: {err_msg}. Menyemak status penerbitan sebenar di profil...")
@@ -211,6 +237,13 @@ def post_to_instagram_feed(account_id: str, access_token: str, caption: str, ima
 
     except Exception as e:
         return False, f"Ralat Rangkaian Instagram API: {str(e)}"
+
+    finally:
+        # =====================================================================
+        # PEMBERSIHAN AUTOMATIK FAIL STORAN BACKBLAZE B2
+        # =====================================================================
+        if bridge_data:
+            shopee_b2_bridge.cleanup_bridge(bridge_data)
 
 
 def run_instagram_posting():
@@ -241,7 +274,7 @@ def run_instagram_posting():
             json.dump(payload, f, ensure_ascii=False, indent=2)
         return
 
-    # 2. Dapatkan data hantaran dari payload secara seragam & selamat
+    # 2. Dapatkan data hantaran dari payload
     caption = payload.get("ai_captions", {}).get("instagram", "")
     image_url = (
         payload.get("picture_url")
@@ -253,16 +286,22 @@ def run_instagram_posting():
         or payload.get("shopee_product_name")
         or payload.get("title", "Produk Shopee")
     )
+    product_id = str(
+        payload.get("product_id")
+        or payload.get("shopee_product_id")
+        or ""
+    ).strip()
 
-    print(f"📦 Produk : {product_name}")
+    print(f"📦 Produk : {product_name} (ID: {product_id})")
     print(f"🖼️ Gambar : {image_url}")
 
-    # 3. Lakukan hantaran ke Instagram Feed
+    # 3. Lakukan hantaran ke Instagram Feed melalui B2 Bridge
     ok, result = post_to_instagram_feed(
         account_id=account_id,
         access_token=access_token,
         caption=caption,
-        image_url=image_url
+        image_url=image_url,
+        product_id=product_id
     )
 
     # 4. Kemas kini status hasil hantaran
